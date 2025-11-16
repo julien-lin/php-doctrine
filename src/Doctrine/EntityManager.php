@@ -226,6 +226,14 @@ class EntityManager
     }
 
     /**
+     * Retourne le lecteur de métadonnées
+     */
+    public function getMetadataReader(): MetadataReader
+    {
+        return $this->metadataReader;
+    }
+
+    /**
      * Démarre une transaction
      */
     public function beginTransaction(): void
