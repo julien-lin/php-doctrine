@@ -66,9 +66,29 @@ class EntityManager
      */
     public function flush(): void
     {
-        // Persister les nouvelles entités
+        // Persister les nouvelles entités ou mettre à jour les existantes
         foreach ($this->toPersist as $entity) {
-            $this->insertEntity($entity);
+            $className = get_class($entity);
+            $metadata = $this->metadataReader->getMetadata($className);
+            
+            // Vérifier si l'entité a un ID (mise à jour) ou non (insertion)
+            if ($metadata['id'] !== null) {
+                $reflection = new \ReflectionClass($entity);
+                $idProperty = $reflection->getProperty($metadata['id']);
+                $idProperty->setAccessible(true);
+                $id = $idProperty->getValue($entity);
+                
+                if ($id !== null && $id !== 0) {
+                    // L'entité a un ID, c'est une mise à jour
+                    $this->updateEntity($entity);
+                } else {
+                    // L'entité n'a pas d'ID, c'est une insertion
+                    $this->insertEntity($entity);
+                }
+            } else {
+                // Pas d'ID défini, insertion
+                $this->insertEntity($entity);
+            }
         }
         $this->toPersist = [];
 
@@ -136,6 +156,59 @@ class EntityManager
                 $idProperty->setValue($entity, (int)$lastId);
             }
         }
+    }
+
+    /**
+     * Met à jour une entité en base de données
+     */
+    private function updateEntity(object $entity): void
+    {
+        $className = get_class($entity);
+        $metadata = $this->metadataReader->getMetadata($className);
+        $tableName = $this->escapeIdentifier($metadata['table']);
+        
+        $sets = [];
+        $params = [];
+        
+        // Récupérer l'ID pour la clause WHERE
+        $reflection = new \ReflectionClass($entity);
+        $idPropertyName = $metadata['id'];
+        $idProperty = $reflection->getProperty($idPropertyName);
+        $idProperty->setAccessible(true);
+        $idValue = $idProperty->getValue($entity);
+        
+        if ($idValue === null) {
+            throw new \RuntimeException("Impossible de mettre à jour une entité sans ID");
+        }
+        
+        $idColumn = $metadata['columns'][$idPropertyName]['name'] ?? $idPropertyName;
+        
+        foreach ($metadata['columns'] as $propertyName => $columnInfo) {
+            // Ignorer l'ID dans les SET
+            if ($propertyName === $idPropertyName) {
+                continue;
+            }
+            
+            $property = $reflection->getProperty($propertyName);
+            $property->setAccessible(true);
+            $value = $property->getValue($entity);
+            
+            // Ignorer les valeurs null sauf si nullable
+            if ($value === null && !$columnInfo['nullable']) {
+                continue;
+            }
+            
+            $columnName = $columnInfo['name'];
+            $sets[] = $this->escapeIdentifier($columnName) . " = :{$columnName}";
+            $params[$columnName] = $this->convertToDatabaseValue($value, $columnInfo['type']);
+        }
+        
+        // Ajouter l'ID dans les paramètres pour la clause WHERE
+        $params['id'] = $idValue;
+        $idColumnEscaped = $this->escapeIdentifier($idColumn);
+        
+        $sql = "UPDATE {$tableName} SET " . implode(', ', $sets) . " WHERE {$idColumnEscaped} = :id";
+        $this->connection->execute($sql, $params);
     }
 
     /**
