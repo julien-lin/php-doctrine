@@ -1,0 +1,53 @@
+{
+    "name": "julienlinard/doctrine-php",
+    "description": "ORM style Doctrine pour PHP avec Entity Manager, Repository, Query Builder et mapping avec Attributes PHP 8",
+    "type": "library",
+    "keywords": [
+        "orm",
+        "doctrine",
+        "entity",
+        "repository",
+        "query-builder",
+        "database",
+        "mapping",
+        "php8",
+        "attributes"
+    ],
+    "homepage": "https://github.com/julien-lin/doctrine-php",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Julien Linard",
+            "email": "julien.linard.dev@gmail.com",
+            "homepage": "https://github.com/julien-lin"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/julien-lin/doctrine-php/issues",
+        "source": "https://github.com/julien-lin/doctrine-php"
+    },
+    "require": {
+        "php": ">=8.0",
+        "ext-pdo": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "JulienLinard\\Doctrine\\": "src/Doctrine/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "JulienLinard\\Doctrine\\Tests\\": "tests/"
+        }
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.5"
+    },
+    "scripts": {
+        "test": "phpunit",
+        "test-coverage": "phpunit --coverage-text"
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
+
