@@ -80,13 +80,21 @@ class EntityManager
     }
 
     /**
+     * Échappe un identifiant SQL (table ou colonne) avec des backticks
+     */
+    private function escapeIdentifier(string $identifier): string
+    {
+        return "`{$identifier}`";
+    }
+
+    /**
      * Insère une entité en base de données
      */
     private function insertEntity(object $entity): void
     {
         $className = get_class($entity);
         $metadata = $this->metadataReader->getMetadata($className);
-        $tableName = $metadata['table'];
+        $tableName = $this->escapeIdentifier($metadata['table']);
         
         $columns = [];
         $values = [];
@@ -109,7 +117,7 @@ class EntityManager
             }
             
             $columnName = $columnInfo['name'];
-            $columns[] = $columnName;
+            $columns[] = $this->escapeIdentifier($columnName);
             $values[] = ":{$columnName}";
             $params[$columnName] = $this->convertToDatabaseValue($value, $columnInfo['type']);
         }
@@ -137,7 +145,7 @@ class EntityManager
     {
         $className = get_class($entity);
         $metadata = $this->metadataReader->getMetadata($className);
-        $tableName = $metadata['table'];
+        $tableName = $this->escapeIdentifier($metadata['table']);
         $idProperty = $metadata['id'];
         
         if ($idProperty === null) {
@@ -153,7 +161,7 @@ class EntityManager
             throw new \RuntimeException("Impossible de supprimer une entité sans ID.");
         }
         
-        $idColumn = $metadata['columns'][$idProperty]['name'] ?? $idProperty;
+        $idColumn = $this->escapeIdentifier($metadata['columns'][$idProperty]['name'] ?? $idProperty);
         $sql = "DELETE FROM {$tableName} WHERE {$idColumn} = :id";
         $this->connection->execute($sql, ['id' => $id]);
     }

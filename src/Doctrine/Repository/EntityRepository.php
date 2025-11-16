@@ -37,6 +37,14 @@ class EntityRepository implements RepositoryInterface
     }
 
     /**
+     * Échappe un identifiant SQL (table ou colonne) avec des backticks
+     */
+    protected function escapeIdentifier(string $identifier): string
+    {
+        return "`{$identifier}`";
+    }
+
+    /**
      * Trouve une entité par son ID
      */
     public function find(int|string $id): ?object
@@ -48,7 +56,9 @@ class EntityRepository implements RepositoryInterface
         $metadata = $this->metadataReader->getMetadata($this->entityClass);
         $idColumn = $metadata['columns'][$this->idProperty]['name'] ?? $this->idProperty;
 
-        $sql = "SELECT * FROM {$this->tableName} WHERE {$idColumn} = :id";
+        $tableName = $this->escapeIdentifier($this->tableName);
+        $idColumnEscaped = $this->escapeIdentifier($idColumn);
+        $sql = "SELECT * FROM {$tableName} WHERE {$idColumnEscaped} = :id";
         $row = $this->connection->fetchOne($sql, ['id' => $id]);
 
         if ($row === null) {
@@ -63,7 +73,8 @@ class EntityRepository implements RepositoryInterface
      */
     public function findAll(): array
     {
-        $sql = "SELECT * FROM {$this->tableName}";
+        $tableName = $this->escapeIdentifier($this->tableName);
+        $sql = "SELECT * FROM {$tableName}";
         $rows = $this->connection->fetchAll($sql);
         return array_map([$this, 'hydrate'], $rows);
     }
@@ -73,13 +84,15 @@ class EntityRepository implements RepositoryInterface
      */
     public function findBy(array $criteria, ?array $orderBy = null, ?int $limit = null, ?int $offset = null): array
     {
-        $sql = "SELECT * FROM {$this->tableName}";
+        $tableName = $this->escapeIdentifier($this->tableName);
+        $sql = "SELECT * FROM {$tableName}";
         $params = [];
 
         if (!empty($criteria)) {
             $conditions = [];
             foreach ($criteria as $field => $value) {
-                $conditions[] = "{$field} = :{$field}";
+                $fieldEscaped = $this->escapeIdentifier($field);
+                $conditions[] = "{$fieldEscaped} = :{$field}";
                 $params[$field] = $value;
             }
             $sql .= " WHERE " . implode(' AND ', $conditions);
@@ -88,7 +101,8 @@ class EntityRepository implements RepositoryInterface
         if ($orderBy !== null) {
             $orders = [];
             foreach ($orderBy as $field => $direction) {
-                $orders[] = "{$field} " . strtoupper($direction);
+                $fieldEscaped = $this->escapeIdentifier($field);
+                $orders[] = "{$fieldEscaped} " . strtoupper($direction);
             }
             $sql .= " ORDER BY " . implode(', ', $orders);
         }
