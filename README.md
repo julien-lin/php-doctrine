@@ -128,6 +128,8 @@ $em->flush();
 
 ### Repository
 
+#### Repository standard
+
 ```php
 $repository = $em->getRepository(User::class);
 
@@ -141,6 +143,38 @@ $users = $repository->findAll();
 $users = $repository->findBy(['is_active' => true]);
 $user = $repository->findOneBy(['email' => 'test@example.com']);
 ```
+
+#### Repository personnalisé
+
+Pour créer un repository personnalisé avec le MetadataReader partagé (recommandé pour les performances) :
+
+```php
+use JulienLinard\Doctrine\Repository\EntityRepository;
+
+class UserRepository extends EntityRepository
+{
+    public function __construct(EntityManager $em, string $entityClass)
+    {
+        // Utiliser getMetadataReader() pour partager l'instance
+        parent::__construct(
+            $em->getConnection(), 
+            $em->getMetadataReader(), 
+            $entityClass
+        );
+    }
+    
+    public function findActiveUsers(): array
+    {
+        return $this->findBy(['is_active' => true]);
+    }
+}
+
+// Créer le repository personnalisé
+$userRepo = $em->createRepository(UserRepository::class, User::class);
+$activeUsers = $userRepo->findActiveUsers();
+```
+
+**⚠️ Important** : Utilisez toujours `$em->getMetadataReader()` au lieu de `new MetadataReader()` pour éviter la création de multiples instances et améliorer les performances.
 
 ### Query Builder
 

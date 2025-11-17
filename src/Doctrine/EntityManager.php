@@ -271,6 +271,63 @@ class EntityManager
     }
 
     /**
+     * Crée un repository personnalisé avec le MetadataReader partagé
+     * 
+     * Cette méthode facilite la création de repositories personnalisés en utilisant
+     * automatiquement le MetadataReader de l'EntityManager, évitant ainsi la création
+     * de multiples instances et améliorant les performances.
+     * 
+     * @param string $repositoryClass Classe du repository personnalisé (doit étendre EntityRepository)
+     * @param string $entityClass Classe de l'entité
+     * @return RepositoryInterface Instance du repository
+     * @throws \RuntimeException Si la classe du repository n'existe pas ou n'étend pas EntityRepository
+     * 
+     * @example
+     * ```php
+     * // Au lieu de :
+     * $repo = new PizzaRepository($em, Pizza::class);
+     * // Dans PizzaRepository::__construct() :
+     * parent::__construct($em->getConnection(), new MetadataReader(), $entityClass);
+     * 
+     * // Utilisez :
+     * $repo = $em->createRepository(PizzaRepository::class, Pizza::class);
+     * // Le MetadataReader sera automatiquement partagé
+     * ```
+     */
+    public function createRepository(string $repositoryClass, string $entityClass): RepositoryInterface
+    {
+        if (!class_exists($repositoryClass)) {
+            throw new \RuntimeException("La classe de repository {$repositoryClass} n'existe pas.");
+        }
+
+        if (!is_subclass_of($repositoryClass, EntityRepository::class)) {
+            throw new \RuntimeException(
+                "La classe de repository {$repositoryClass} doit étendre " . EntityRepository::class . "."
+            );
+        }
+
+        // Vérifier si le repository a un constructeur qui accepte EntityManager
+        $reflection = new \ReflectionClass($repositoryClass);
+        $constructor = $reflection->getConstructor();
+        
+        if ($constructor === null) {
+            throw new \RuntimeException(
+                "Le repository {$repositoryClass} doit avoir un constructeur qui accepte EntityManager et string."
+            );
+        }
+
+        $parameters = $constructor->getParameters();
+        
+        // Si le constructeur accepte EntityManager en premier paramètre, l'utiliser
+        if (count($parameters) >= 1 && $parameters[0]->getType()?->getName() === self::class) {
+            return new $repositoryClass($this, $entityClass);
+        }
+
+        // Sinon, créer avec Connection et MetadataReader (ancienne méthode)
+        return new $repositoryClass($this->connection, $this->metadataReader, $entityClass);
+    }
+
+    /**
      * Crée un Query Builder
      *
      * @return QueryBuilder\QueryBuilder Query Builder
