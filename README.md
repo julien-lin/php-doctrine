@@ -277,6 +277,231 @@ try {
 }
 ```
 
+### Migrations
+
+Le système de migrations permet de générer automatiquement les migrations SQL à partir de vos entités Doctrine.
+
+#### Génération d'une migration
+
+```php
+use JulienLinard\Doctrine\EntityManager;
+use App\Entity\User;
+use App\Entity\Todo;
+
+$em = new EntityManager($config);
+
+// Générer une migration pour une entité
+$sql = $em->generateMigration(User::class);
+echo $sql;
+
+// Générer des migrations pour plusieurs entités
+$sql = $em->generateMigrations([User::class, Todo::class]);
+```
+
+#### Exécution d'une migration
+
+```php
+use JulienLinard\Doctrine\EntityManager;
+
+$em = new EntityManager($config);
+$runner = $em->getMigrationRunner();
+$manager = $em->getMigrationManager();
+
+// Générer le nom de la migration
+$migrationName = $manager->generateMigrationName();
+
+// Exécuter la migration
+$sql = $em->generateMigration(User::class);
+if (!empty($sql)) {
+    $runner->run($sql);
+    $manager->markAsExecuted($migrationName);
+    echo "Migration {$migrationName} appliquée avec succès.\n";
+}
+```
+
+#### Vérifier les migrations appliquées
+
+```php
+$manager = $em->getMigrationManager();
+$executed = $manager->getExecutedMigrations();
+
+foreach ($executed as $migration) {
+    echo "✅ {$migration}\n";
+}
+```
+
+#### Script CLI intégré (recommandé)
+
+Le package inclut un script CLI prêt à l'emploi qui détecte automatiquement votre configuration de base de données.
+
+**Utilisation directe depuis le package** :
+
+```bash
+# Depuis votre projet (après installation via composer)
+php vendor/julienlinard/doctrine-php/bin/doctrine-migrate generate
+php vendor/julienlinard/doctrine-php/bin/doctrine-migrate migrate
+php vendor/julienlinard/doctrine-php/bin/doctrine-migrate status
+```
+
+**Ou via Composer** :
+
+```bash
+composer exec doctrine-migrate generate
+composer exec doctrine-migrate migrate
+composer exec doctrine-migrate status
+```
+
+**Créer un lien symbolique (recommandé)** :
+
+```bash
+# Créer un lien symbolique dans votre projet
+ln -s vendor/julienlinard/doctrine-php/bin/doctrine-migrate bin/doctrine-migrate
+
+# Puis utiliser directement
+php bin/doctrine-migrate generate
+php bin/doctrine-migrate migrate
+php bin/doctrine-migrate status
+```
+
+**Configuration automatique** :
+
+Le script cherche automatiquement la configuration dans cet ordre :
+
+1. Variable d'environnement `DOCTRINE_CONFIG` (chemin vers fichier PHP)
+2. `config/database.php` (depuis le répertoire courant)
+3. `../config/database.php` (depuis le répertoire courant)
+4. Variables d'environnement `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
+
+**Exemple de fichier `config/database.php`** :
+
+```php
+<?php
+
+return [
+    'driver' => 'mysql',
+    'host' => 'localhost',
+    'dbname' => 'mydatabase',
+    'user' => 'root',
+    'password' => 'password',
+    'charset' => 'utf8mb4',
+];
+```
+
+**Commandes disponibles** :
+
+- `generate [EntityClass]` - Génère une migration pour une entité ou toutes les entités
+- `migrate` - Exécute les migrations en attente
+- `status` - Affiche le statut des migrations
+- `help` - Affiche l'aide
+
+#### Script CLI personnalisé (optionnel)
+
+Si vous préférez créer votre propre script CLI personnalisé :
+
+**Créer `bin/migrate.php` dans votre application** :
+
+```php
+#!/usr/bin/env php
+<?php
+
+require_once __DIR__ . '/../vendor/autoload.php';
+
+use JulienLinard\Doctrine\EntityManager;
+
+// Charger la configuration
+$config = require __DIR__ . '/../config/database.php';
+$em = new EntityManager($config);
+
+// Récupérer l'action depuis les arguments CLI
+$action = $argv[1] ?? 'status';
+$entityClass = $argv[2] ?? null;
+
+try {
+    match ($action) {
+        'generate' => generateMigration($em, $entityClass),
+        'migrate' => executeMigrations($em),
+        'status' => showStatus($em),
+        default => throw new \InvalidArgumentException(
+            "Action inconnue : {$action}. Utilisez 'generate', 'migrate' ou 'status'"
+        )
+    };
+} catch (\Exception $e) {
+    echo "❌ Erreur : {$e->getMessage()}\n";
+    exit(1);
+}
+
+function generateMigration(EntityManager $em, ?string $entityClass): void
+{
+    echo "🔍 Génération de la migration...\n\n";
+    
+    if ($entityClass) {
+        $sql = $em->generateMigration($entityClass);
+        if (empty($sql)) {
+            echo "✅ Aucune migration nécessaire.\n";
+            return;
+        }
+        echo "📄 Migration SQL :\n" . $sql . "\n";
+    } else {
+        // Générer pour toutes les entités
+        $entities = [/* vos classes d'entités */];
+        $sql = $em->generateMigrations($entities);
+        if (!empty($sql)) {
+            $manager = $em->getMigrationManager();
+            $migrationName = $manager->generateMigrationName();
+            $filename = __DIR__ . '/../migrations/' . $migrationName . '.sql';
+            file_put_contents($filename, $sql);
+            echo "💾 Migration sauvegardée : {$filename}\n";
+        }
+    }
+}
+
+function executeMigrations(EntityManager $em): void
+{
+    $migrationsPath = __DIR__ . '/../migrations';
+    $files = glob($migrationsPath . '/*.sql');
+    $manager = $em->getMigrationManager();
+    $runner = $em->getMigrationRunner();
+    $executed = $manager->getExecutedMigrations();
+    
+    foreach ($files as $file) {
+        $migrationName = basename($file, '.sql');
+        if (!in_array($migrationName, $executed)) {
+            echo "▶️  Exécution de {$migrationName}...\n";
+            $sql = file_get_contents($file);
+            $runner->run($sql);
+            $manager->markAsExecuted($migrationName);
+            echo "✅ Migration appliquée.\n";
+        }
+    }
+}
+
+function showStatus(EntityManager $em): void
+{
+    $manager = $em->getMigrationManager();
+    $executed = $manager->getExecutedMigrations();
+    
+    echo "📊 Migrations appliquées : " . count($executed) . "\n";
+    foreach ($executed as $migration) {
+        echo "  ✅ {$migration}\n";
+    }
+}
+```
+
+**Rendre le script exécutable** :
+```bash
+chmod +x bin/migrate.php
+```
+
+**Utilisation** :
+```bash
+php bin/migrate.php generate          # Génère une migration
+php bin/migrate.php generate App\Entity\User  # Pour une entité spécifique
+php bin/migrate.php migrate            # Exécute les migrations
+php bin/migrate.php status             # Affiche le statut
+```
+
+> **Note** : `symfony/console` est optionnel et suggéré uniquement si vous souhaitez créer des commandes CLI plus structurées avec validation d'arguments, options, etc. Pour un usage simple, un script PHP natif suffit largement.
+
 ### Méthodes EntityManager
 
 #### `persist(object $entity): void`
@@ -373,6 +598,41 @@ Annule une transaction.
 
 ```php
 $em->rollback();
+```
+
+#### `generateMigration(string $entityClass): string`
+
+Génère une migration SQL pour une entité.
+
+```php
+$sql = $em->generateMigration(User::class);
+```
+
+#### `generateMigrations(array $entityClasses): string`
+
+Génère des migrations SQL pour plusieurs entités.
+
+```php
+$sql = $em->generateMigrations([User::class, Post::class]);
+```
+
+#### `getMigrationManager(): MigrationManager`
+
+Retourne le gestionnaire de migrations.
+
+```php
+$manager = $em->getMigrationManager();
+$migrationName = $manager->generateMigrationName();
+$executed = $manager->getExecutedMigrations();
+```
+
+#### `getMigrationRunner(): MigrationRunner`
+
+Retourne l'exécuteur de migrations.
+
+```php
+$runner = $em->getMigrationRunner();
+$runner->run($sql);
 ```
 
 ## 🔗 Intégration avec les autres packages

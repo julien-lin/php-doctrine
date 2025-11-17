@@ -29,6 +29,11 @@ class EntityManager
      * Cache des repositories
      */
     private array $repositories = [];
+    
+    /**
+     * Cache des instances ReflectionClass
+     */
+    private array $reflectionCache = [];
 
     /**
      * Constructeur
@@ -73,7 +78,7 @@ class EntityManager
             
             // Vérifier si l'entité a un ID (mise à jour) ou non (insertion)
             if ($metadata['id'] !== null) {
-                $reflection = new \ReflectionClass($entity);
+                $reflection = $this->getReflectionClass($entity);
                 $idProperty = $reflection->getProperty($metadata['id']);
                 $idProperty->setAccessible(true);
                 $id = $idProperty->getValue($entity);
@@ -100,6 +105,23 @@ class EntityManager
     }
 
     /**
+     * Récupère ou crée une instance ReflectionClass pour une classe
+     * 
+     * @param string|object $class Classe ou objet
+     * @return \ReflectionClass Instance de ReflectionClass
+     */
+    private function getReflectionClass(string|object $class): \ReflectionClass
+    {
+        $className = is_object($class) ? get_class($class) : $class;
+        
+        if (!isset($this->reflectionCache[$className])) {
+            $this->reflectionCache[$className] = new \ReflectionClass($className);
+        }
+        
+        return $this->reflectionCache[$className];
+    }
+
+    /**
      * Échappe un identifiant SQL (table ou colonne) avec des backticks
      */
     private function escapeIdentifier(string $identifier): string
@@ -120,8 +142,9 @@ class EntityManager
         $values = [];
         $params = [];
         
+        $reflection = $this->getReflectionClass($entity);
+        
         foreach ($metadata['columns'] as $propertyName => $columnInfo) {
-            $reflection = new \ReflectionClass($entity);
             $property = $reflection->getProperty($propertyName);
             $property->setAccessible(true);
             $value = $property->getValue($entity);
@@ -150,7 +173,6 @@ class EntityManager
             $idColumn = $metadata['columns'][$metadata['id']]['name'] ?? $metadata['id'];
             $lastId = $this->connection->lastInsertId();
             if ($lastId) {
-                $reflection = new \ReflectionClass($entity);
                 $idProperty = $reflection->getProperty($metadata['id']);
                 $idProperty->setAccessible(true);
                 $idProperty->setValue($entity, (int)$lastId);
@@ -171,7 +193,7 @@ class EntityManager
         $params = [];
         
         // Récupérer l'ID pour la clause WHERE
-        $reflection = new \ReflectionClass($entity);
+        $reflection = $this->getReflectionClass($entity);
         $idPropertyName = $metadata['id'];
         $idProperty = $reflection->getProperty($idPropertyName);
         $idProperty->setAccessible(true);
@@ -225,7 +247,7 @@ class EntityManager
             throw new \RuntimeException("Impossible de supprimer une entité sans ID.");
         }
         
-        $reflection = new \ReflectionClass($entity);
+        $reflection = $this->getReflectionClass($entity);
         $property = $reflection->getProperty($idProperty);
         $property->setAccessible(true);
         $id = $property->getValue($entity);
@@ -393,6 +415,58 @@ class EntityManager
     public function rollback(): void
     {
         $this->connection->rollback();
+    }
+
+    /**
+     * Génère une migration pour une entité
+     * 
+     * @param string $entityClass Classe de l'entité
+     * @return string SQL de migration
+     */
+    public function generateMigration(string $entityClass): string
+    {
+        $generator = new \JulienLinard\Doctrine\Migration\MigrationGenerator(
+            $this->connection,
+            $this->metadataReader
+        );
+        
+        return $generator->generateForEntity($entityClass);
+    }
+    
+    /**
+     * Génère des migrations pour plusieurs entités
+     * 
+     * @param array $entityClasses Tableau de classes d'entités
+     * @return string SQL combiné
+     */
+    public function generateMigrations(array $entityClasses): string
+    {
+        $generator = new \JulienLinard\Doctrine\Migration\MigrationGenerator(
+            $this->connection,
+            $this->metadataReader
+        );
+        
+        return $generator->generateForEntities($entityClasses);
+    }
+    
+    /**
+     * Retourne le MigrationManager
+     * 
+     * @return \JulienLinard\Doctrine\Migration\MigrationManager
+     */
+    public function getMigrationManager(): \JulienLinard\Doctrine\Migration\MigrationManager
+    {
+        return new \JulienLinard\Doctrine\Migration\MigrationManager($this->connection);
+    }
+    
+    /**
+     * Retourne le MigrationRunner
+     * 
+     * @return \JulienLinard\Doctrine\Migration\MigrationRunner
+     */
+    public function getMigrationRunner(): \JulienLinard\Doctrine\Migration\MigrationRunner
+    {
+        return new \JulienLinard\Doctrine\Migration\MigrationRunner($this->connection);
     }
 }
 

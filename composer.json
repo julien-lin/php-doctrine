@@ -1,6 +1,6 @@
 {
     "name": "julienlinard/doctrine-php",
-    "description": "ORM style Doctrine pour PHP avec Entity Manager, Repository, Query Builder et mapping avec Attributes PHP 8",
+    "description": "Modern ORM for PHP 8+ inspired by Doctrine, with Entity Manager, Repository Pattern, Query Builder and PHP 8 Attributes mapping",
     "type": "library",
     "keywords": [
         "orm",
@@ -43,12 +43,24 @@
     "require-dev": {
         "phpunit/phpunit": "^11.5"
     },
+    "suggest": {
+        "symfony/console": "Optional: For structured CLI commands for migrations"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "phpunit/phpunit": true
+        }
+    },
     "scripts": {
         "test": "phpunit",
-        "test-coverage": "phpunit --coverage-text"
+        "test-coverage": "phpunit --coverage-text",
+        "doctrine-migrate": "php bin/doctrine-migrate"
     },
+    "bin": [
+        "bin/doctrine-migrate"
+    ],
     "minimum-stability": "stable",
-    "prefer-stable": true,
-    "version": "1.0.6"
+    "prefer-stable": true
 }
 

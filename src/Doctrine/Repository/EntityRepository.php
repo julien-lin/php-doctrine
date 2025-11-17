@@ -37,10 +37,32 @@ class EntityRepository implements RepositoryInterface
     }
 
     /**
+     * Valide qu'un identifiant SQL est valide
+     * 
+     * @param string $identifier Identifiant à valider
+     * @throws \InvalidArgumentException Si l'identifiant n'est pas valide
+     */
+    protected function validateIdentifier(string $identifier): void
+    {
+        // Un identifiant SQL valide commence par une lettre ou underscore
+        // et contient uniquement des lettres, chiffres et underscores
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $identifier)) {
+            throw new \InvalidArgumentException(
+                "Invalid identifier: '{$identifier}'. Identifiers must start with a letter or underscore and contain only letters, numbers, and underscores."
+            );
+        }
+    }
+
+    /**
      * Échappe un identifiant SQL (table ou colonne) avec des backticks
+     * 
+     * @param string $identifier Identifiant à échapper
+     * @return string Identifiant échappé
+     * @throws \InvalidArgumentException Si l'identifiant n'est pas valide
      */
     protected function escapeIdentifier(string $identifier): string
     {
+        $this->validateIdentifier($identifier);
         return "`{$identifier}`";
     }
 
@@ -101,8 +123,19 @@ class EntityRepository implements RepositoryInterface
         if ($orderBy !== null) {
             $orders = [];
             foreach ($orderBy as $field => $direction) {
+                // Valider le nom du champ
+                $this->validateIdentifier($field);
                 $fieldEscaped = $this->escapeIdentifier($field);
-                $orders[] = "{$fieldEscaped} " . strtoupper($direction);
+                
+                // Valider la direction (ASC ou DESC)
+                $direction = strtoupper($direction);
+                if (!in_array($direction, ['ASC', 'DESC'], true)) {
+                    throw new \InvalidArgumentException(
+                        "Invalid order direction: '{$direction}'. Must be 'ASC' or 'DESC'."
+                    );
+                }
+                
+                $orders[] = "{$fieldEscaped} {$direction}";
             }
             $sql .= " ORDER BY " . implode(', ', $orders);
         }

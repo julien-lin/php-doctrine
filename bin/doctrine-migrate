@@ -1,0 +1,415 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * Script CLI pour gérer les migrations Doctrine
+ * 
+ * Ce script cherche automatiquement la configuration de la base de données
+ * dans les emplacements standards ou peut utiliser une variable d'environnement.
+ * 
+ * Usage:
+ *   php bin/doctrine-migrate generate [EntityClass]  # Génère une migration
+ *   php bin/doctrine-migrate migrate                  # Exécute les migrations en attente
+ *   php bin/doctrine-migrate status                  # Affiche le statut
+ * 
+ * Configuration:
+ *   Le script cherche la config dans (dans cet ordre):
+ *   1. Variable d'environnement DOCTRINE_CONFIG (chemin vers fichier PHP)
+ *   2. config/database.php (depuis le répertoire courant)
+ *   3. ../config/database.php (depuis le répertoire courant)
+ *   4. Variables d'environnement DB_* (DB_HOST, DB_NAME, DB_USER, DB_PASSWORD)
+ */
+
+// Trouver le répertoire du package
+$packageDir = __DIR__;
+$autoloadPath = $packageDir . '/../vendor/autoload.php';
+
+// Si on est dans vendor, utiliser l'autoload du package parent
+if (!file_exists($autoloadPath)) {
+    // Chercher depuis le répertoire courant (application)
+    $currentDir = getcwd();
+    $autoloadPath = $currentDir . '/vendor/autoload.php';
+    
+    if (!file_exists($autoloadPath)) {
+        echo "❌ Erreur : Impossible de trouver vendor/autoload.php\n";
+        echo "Assurez-vous d'exécuter ce script depuis le répertoire racine de votre projet.\n";
+        exit(1);
+    }
+}
+
+require_once $autoloadPath;
+
+use JulienLinard\Doctrine\EntityManager;
+
+// Charger la configuration
+$config = loadDatabaseConfig();
+
+if ($config === null) {
+    echo "❌ Erreur : Impossible de charger la configuration de la base de données.\n";
+    echo "\nLe script cherche la configuration dans:\n";
+    echo "  1. Variable d'environnement DOCTRINE_CONFIG (chemin vers fichier PHP)\n";
+    echo "  2. config/database.php\n";
+    echo "  3. ../config/database.php\n";
+    echo "  4. Variables d'environnement DB_HOST, DB_NAME, DB_USER, DB_PASSWORD\n";
+    echo "\nCréez un fichier config/database.php avec:\n";
+    echo "<?php\n";
+    echo "return [\n";
+    echo "    'driver' => 'mysql',\n";
+    echo "    'host' => 'localhost',\n";
+    echo "    'dbname' => 'mydatabase',\n";
+    echo "    'user' => 'root',\n";
+    echo "    'password' => 'password'\n";
+    echo "];\n";
+    exit(1);
+}
+
+// Créer EntityManager
+try {
+    $em = new EntityManager($config);
+} catch (\Exception $e) {
+    echo "❌ Erreur de connexion : {$e->getMessage()}\n";
+    exit(1);
+}
+
+// Récupérer l'action depuis les arguments CLI
+$action = $argv[1] ?? 'status';
+$entityClass = $argv[2] ?? null;
+
+try {
+    match ($action) {
+        'generate' => generateMigration($em, $entityClass),
+        'migrate' => executeMigrations($em),
+        'status' => showStatus($em),
+        'help' => showHelp(),
+        default => throw new \InvalidArgumentException(
+            "Action inconnue : {$action}. Utilisez 'generate', 'migrate', 'status' ou 'help'"
+        )
+    };
+} catch (\Exception $e) {
+    echo "❌ Erreur : {$e->getMessage()}\n";
+    exit(1);
+}
+
+/**
+ * Charge la configuration de la base de données
+ */
+function loadDatabaseConfig(): ?array
+{
+    // 1. Variable d'environnement DOCTRINE_CONFIG
+    if (($configPath = getenv('DOCTRINE_CONFIG')) && file_exists($configPath)) {
+        $config = require $configPath;
+        if (is_array($config)) {
+            return $config;
+        }
+    }
+    
+    // 2. config/database.php depuis le répertoire courant
+    $currentDir = getcwd();
+    $configPath = $currentDir . '/config/database.php';
+    if (file_exists($configPath)) {
+        $config = require $configPath;
+        if (is_array($config)) {
+            return $config;
+        }
+    }
+    
+    // 3. ../config/database.php depuis le répertoire courant
+    $configPath = $currentDir . '/../config/database.php';
+    if (file_exists($configPath)) {
+        $config = require $configPath;
+        if (is_array($config)) {
+            return $config;
+        }
+    }
+    
+    // 4. Variables d'environnement DB_*
+    $dbHost = getenv('DB_HOST');
+    $dbName = getenv('DB_NAME') ?: getenv('DB_DATABASE');
+    $dbUser = getenv('DB_USER') ?: getenv('DB_USERNAME');
+    $dbPassword = getenv('DB_PASSWORD') ?: getenv('DB_PASS');
+    
+    if ($dbHost && $dbName && $dbUser) {
+        return [
+            'driver' => getenv('DB_DRIVER') ?: 'mysql',
+            'host' => $dbHost,
+            'port' => getenv('DB_PORT') ?: null,
+            'dbname' => $dbName,
+            'user' => $dbUser,
+            'password' => $dbPassword ?: '',
+            'charset' => getenv('DB_CHARSET') ?: 'utf8mb4',
+        ];
+    }
+    
+    return null;
+}
+
+/**
+ * Génère une migration pour une ou plusieurs entités
+ */
+function generateMigration(EntityManager $em, ?string $entityClass): void
+{
+    echo "🔍 Génération de la migration...\n\n";
+    
+    if ($entityClass) {
+        // Migration pour une seule entité
+        if (!class_exists($entityClass)) {
+            throw new \RuntimeException("La classe {$entityClass} n'existe pas.");
+        }
+        
+        $sql = $em->generateMigration($entityClass);
+        
+        if (empty($sql)) {
+            echo "✅ Aucune migration nécessaire pour {$entityClass}.\n";
+            return;
+        }
+        
+        echo "📄 Migration SQL pour {$entityClass} :\n";
+        echo str_repeat("=", 60) . "\n";
+        echo $sql . "\n";
+        echo str_repeat("=", 60) . "\n";
+        
+        // Proposer de sauvegarder
+        $manager = $em->getMigrationManager();
+        $migrationName = $manager->generateMigrationName();
+        $migrationsPath = getcwd() . '/migrations';
+        
+        if (!is_dir($migrationsPath)) {
+            mkdir($migrationsPath, 0755, true);
+        }
+        
+        $filename = $migrationsPath . '/' . $migrationName . '.sql';
+        file_put_contents($filename, $sql);
+        
+        echo "\n💾 Migration sauvegardée dans : {$filename}\n";
+    } else {
+        // Migration pour toutes les entités dans src/Entity ou App/Entity
+        $entitiesPath = findEntitiesPath();
+        $entityClasses = scanEntities($entitiesPath);
+        
+        if (empty($entityClasses)) {
+            echo "⚠️  Aucune entité trouvée.\n";
+            echo "Cherché dans : {$entitiesPath}\n";
+            echo "\nVous pouvez spécifier une entité :\n";
+            echo "  php bin/doctrine-migrate generate App\\Entity\\User\n";
+            return;
+        }
+        
+        echo "📋 Entités trouvées : " . implode(', ', $entityClasses) . "\n\n";
+        
+        $sql = $em->generateMigrations($entityClasses);
+        
+        if (empty($sql)) {
+            echo "✅ Aucune migration nécessaire. La base de données est à jour.\n";
+            return;
+        }
+        
+        echo "📄 Migration SQL générée :\n";
+        echo str_repeat("=", 60) . "\n";
+        echo $sql . "\n";
+        echo str_repeat("=", 60) . "\n";
+        
+        // Sauvegarder dans un fichier
+        $manager = $em->getMigrationManager();
+        $migrationName = $manager->generateMigrationName();
+        $migrationsPath = getcwd() . '/migrations';
+        
+        if (!is_dir($migrationsPath)) {
+            mkdir($migrationsPath, 0755, true);
+        }
+        
+        $filename = $migrationsPath . '/' . $migrationName . '.sql';
+        file_put_contents($filename, $sql);
+        
+        echo "\n💾 Migration sauvegardée dans : {$filename}\n";
+    }
+}
+
+/**
+ * Exécute les migrations en attente
+ */
+function executeMigrations(EntityManager $em): void
+{
+    echo "🔍 Recherche des migrations...\n\n";
+    
+    $migrationsPath = getcwd() . '/migrations';
+    
+    if (!is_dir($migrationsPath)) {
+        echo "⚠️  Le dossier migrations n'existe pas. Création...\n";
+        mkdir($migrationsPath, 0755, true);
+    }
+    
+    $files = glob($migrationsPath . '/*.sql');
+    
+    if (empty($files)) {
+        echo "✅ Aucune migration trouvée.\n";
+        return;
+    }
+    
+    $manager = $em->getMigrationManager();
+    $runner = $em->getMigrationRunner();
+    $executed = $manager->getExecutedMigrations();
+    
+    $pending = [];
+    foreach ($files as $file) {
+        $migrationName = basename($file, '.sql');
+        if (!in_array($migrationName, $executed)) {
+            $pending[] = ['name' => $migrationName, 'file' => $file];
+        }
+    }
+    
+    if (empty($pending)) {
+        echo "✅ Toutes les migrations sont déjà appliquées.\n";
+        return;
+    }
+    
+    echo "📋 Migrations en attente : " . count($pending) . "\n\n";
+    
+    foreach ($pending as $migration) {
+        echo "▶️  Exécution de {$migration['name']}...\n";
+        
+        $sql = file_get_contents($migration['file']);
+        
+        try {
+            $runner->run($sql);
+            $manager->markAsExecuted($migration['name']);
+            echo "✅ Migration {$migration['name']} appliquée avec succès.\n\n";
+        } catch (\Exception $e) {
+            echo "❌ Erreur lors de l'exécution de {$migration['name']} : {$e->getMessage()}\n";
+            exit(1);
+        }
+    }
+    
+    echo "✅ Toutes les migrations ont été appliquées.\n";
+}
+
+/**
+ * Affiche le statut des migrations
+ */
+function showStatus(EntityManager $em): void
+{
+    echo "📊 Statut des migrations\n";
+    echo str_repeat("=", 60) . "\n\n";
+    
+    $migrationsPath = getcwd() . '/migrations';
+    $files = glob($migrationsPath . '/*.sql');
+    $manager = $em->getMigrationManager();
+    $executed = $manager->getExecutedMigrations();
+    
+    if (empty($files)) {
+        echo "Aucune migration trouvée dans {$migrationsPath}\n";
+        return;
+    }
+    
+    foreach ($files as $file) {
+        $migrationName = basename($file, '.sql');
+        $status = in_array($migrationName, $executed) ? '✅ Appliquée' : '⏳ En attente';
+        echo "{$migrationName} : {$status}\n";
+    }
+    
+    echo "\n";
+    echo "Total : " . count($files) . " migration(s)\n";
+    echo "Appliquées : " . count($executed) . "\n";
+    echo "En attente : " . (count($files) - count($executed)) . "\n";
+}
+
+/**
+ * Trouve le chemin vers les entités
+ */
+function findEntitiesPath(): string
+{
+    $currentDir = getcwd();
+    $possiblePaths = [
+        $currentDir . '/src/Entity',
+        $currentDir . '/app/Entity',
+        $currentDir . '/App/Entity',
+        $currentDir . '/../src/Entity',
+        $currentDir . '/../app/Entity',
+    ];
+    
+    foreach ($possiblePaths as $path) {
+        if (is_dir($path)) {
+            return $path;
+        }
+    }
+    
+    return $currentDir . '/src/Entity'; // Par défaut
+}
+
+/**
+ * Scanne le dossier des entités pour trouver toutes les classes
+ */
+function scanEntities(string $entitiesPath): array
+{
+    if (!is_dir($entitiesPath)) {
+        return [];
+    }
+    
+    $entities = [];
+    $files = glob($entitiesPath . '/*.php');
+    
+    foreach ($files as $file) {
+        $className = getClassNameFromFile($file);
+        if ($className && isEntity($className)) {
+            $entities[] = $className;
+        }
+    }
+    
+    return $entities;
+}
+
+/**
+ * Extrait le nom de classe depuis un fichier
+ */
+function getClassNameFromFile(string $file): ?string
+{
+    $content = file_get_contents($file);
+    
+    if (preg_match('/namespace\s+([^;]+);/', $content, $namespaceMatches)) {
+        if (preg_match('/class\s+(\w+)/', $content, $classMatches)) {
+            return $namespaceMatches[1] . '\\' . $classMatches[1];
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * Vérifie si une classe est une entité Doctrine
+ */
+function isEntity(string $className): bool
+{
+    try {
+        $reflection = new \ReflectionClass($className);
+        $attributes = $reflection->getAttributes(\JulienLinard\Doctrine\Mapping\Entity::class);
+        return !empty($attributes);
+    } catch (\Exception $e) {
+        return false;
+    }
+}
+
+/**
+ * Affiche l'aide
+ */
+function showHelp(): void
+{
+    echo "📖 Doctrine Migrations CLI\n";
+    echo str_repeat("=", 60) . "\n\n";
+    echo "Usage:\n";
+    echo "  php bin/doctrine-migrate [command] [options]\n\n";
+    echo "Commandes disponibles:\n";
+    echo "  generate [EntityClass]  Génère une migration pour une entité ou toutes les entités\n";
+    echo "  migrate                Exécute les migrations en attente\n";
+    echo "  status                 Affiche le statut des migrations\n";
+    echo "  help                   Affiche cette aide\n\n";
+    echo "Exemples:\n";
+    echo "  php bin/doctrine-migrate generate\n";
+    echo "  php bin/doctrine-migrate generate App\\Entity\\User\n";
+    echo "  php bin/doctrine-migrate migrate\n";
+    echo "  php bin/doctrine-migrate status\n\n";
+    echo "Configuration:\n";
+    echo "  Le script cherche la config dans:\n";
+    echo "  1. Variable d'environnement DOCTRINE_CONFIG\n";
+    echo "  2. config/database.php\n";
+    echo "  3. Variables d'environnement DB_*\n";
+}
+
