@@ -222,14 +222,17 @@ class MigrationGenerator
         foreach ($metadata['columns'] as $propertyName => $columnInfo) {
             $columnName = $columnInfo['name'] ?? $propertyName;
             
+            // Vérifier si c'est la colonne ID (clé primaire)
+            $isPrimary = ($propertyName === $metadata['id']);
+            
             if (!isset($existingColumns[$columnName])) {
                 // Colonne à ajouter
-                $alterations[] = "ADD COLUMN " . $this->generateColumnSQL($propertyName, $columnInfo);
+                $alterations[] = "ADD COLUMN " . $this->generateColumnSQL($propertyName, $columnInfo, $isPrimary);
             } else {
                 // Vérifier si la colonne doit être modifiée
                 $existingColumn = $existingColumns[$columnName];
                 if ($this->columnNeedsUpdate($columnInfo, $existingColumn)) {
-                    $alterations[] = "MODIFY COLUMN " . $this->generateColumnSQL($propertyName, $columnInfo);
+                    $alterations[] = "MODIFY COLUMN " . $this->generateColumnSQL($propertyName, $columnInfo, $isPrimary);
                 }
             }
         }

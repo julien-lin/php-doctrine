@@ -5,6 +5,13 @@ Tous les changements notables de ce projet seront documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.9] - 2024-11-18
+
+### Corrigé
+- **MigrationGenerator** : Correction de la génération SQL pour les colonnes ID avec `AUTO_INCREMENT`
+  - Les colonnes ID incluent maintenant `AUTO_INCREMENT` dans les migrations `ALTER TABLE`
+  - Détection correcte de la colonne primaire dans `generateAlterTableSQL()`
+
 ## [1.0.8] - 2024-11-17
 
 ### Corrigé
