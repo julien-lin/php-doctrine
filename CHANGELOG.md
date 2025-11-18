@@ -5,6 +5,23 @@ Tous les changements notables de ce projet seront documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.8] - 2024-11-17
+
+### Corrigé
+- **MigrationGenerator** : Amélioration de la détection des changements de colonnes
+  - Utilisation de `COLUMN_TYPE` au lieu de `DATA_TYPE` pour une comparaison précise des types SQL
+  - Ajout de la comparaison des valeurs par défaut (`COLUMN_DEFAULT`)
+  - Ajout de la comparaison d'`AUTO_INCREMENT` pour les colonnes ID
+  - Normalisation des types SQL équivalents (`TINYINT(1)` = `BOOLEAN`, `INTEGER` = `INT`)
+  - Amélioration de la gestion des erreurs dans `getExistingColumns()` (exceptions au lieu de tableaux vides)
+- **MigrationGenerator** : Ajout de méthodes de normalisation
+  - `normalizeSQLTypeForComparison()` : Normalise les types SQL équivalents pour comparaison
+  - `normalizeDefaultValue()` : Normalise les valeurs par défaut pour comparaison
+
+### Amélioration
+- Détection plus précise des migrations nécessaires, notamment pour les colonnes booléennes (`TINYINT(1)`)
+- Meilleure gestion des erreurs lors de la récupération des métadonnées de colonnes
+
 ## [1.0.6] - 2024-11-XX
 
 ### Ajouté

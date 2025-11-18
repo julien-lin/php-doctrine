@@ -307,7 +307,7 @@ class MigrationGenerator
     {
         $dbName = $this->getDatabaseName();
         
-        $sql = "SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, 
+        $sql = "SELECT COLUMN_NAME, COLUMN_TYPE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, 
                        IS_NULLABLE, COLUMN_DEFAULT, COLUMN_KEY, EXTRA
                 FROM information_schema.COLUMNS 
                 WHERE TABLE_SCHEMA = :db_name 
@@ -326,7 +326,13 @@ class MigrationGenerator
             
             return $columns;
         } catch (\Exception $e) {
-            return [];
+            // Logger l'erreur au lieu de retourner un tableau vide
+            error_log("Erreur lors de la récupération des colonnes pour {$tableName}: " . $e->getMessage());
+            throw new \RuntimeException(
+                "Impossible de récupérer les colonnes existantes pour la table {$tableName}: " . $e->getMessage(),
+                0,
+                $e
+            );
         }
     }
     
@@ -339,24 +345,117 @@ class MigrationGenerator
      */
     private function columnNeedsUpdate(array $columnInfo, array $existingColumn): bool
     {
-        // Comparer le type
+        // 1. Comparer le type complet (COLUMN_TYPE contient le type avec longueur/précision)
         $expectedType = $this->mapTypeToSQL($columnInfo['type'], $columnInfo['length'] ?? null);
-        $actualType = strtoupper($existingColumn['DATA_TYPE']);
+        $actualType = strtoupper(trim($existingColumn['COLUMN_TYPE'] ?? $existingColumn['DATA_TYPE']));
         
-        // Comparer nullable
+        // Normaliser les types équivalents pour la comparaison
+        // Note: COLUMN_TYPE contient déjà le type complet (ex: "TINYINT(1)", "VARCHAR(255)")
+        $expectedTypeNormalized = $this->normalizeSQLTypeForComparison($expectedType);
+        $actualTypeNormalized = $this->normalizeSQLTypeForComparison($actualType);
+        
+        if ($expectedTypeNormalized !== $actualTypeNormalized) {
+            return true;
+        }
+        
+        // 2. Comparer nullable
         $expectedNullable = $columnInfo['nullable'] ?? false;
         $actualNullable = $existingColumn['IS_NULLABLE'] === 'YES';
         
-        // Comparer la longueur pour VARCHAR
-        if (strpos($expectedType, 'VARCHAR') !== false && isset($columnInfo['length'])) {
-            $expectedLength = $columnInfo['length'];
-            $actualLength = $existingColumn['CHARACTER_MAXIMUM_LENGTH'];
-            if ($expectedLength != $actualLength) {
-                return true;
-            }
+        if ($expectedNullable !== $actualNullable) {
+            return true;
         }
         
-        return $expectedNullable !== $actualNullable;
+        // 3. Comparer les valeurs par défaut
+        $expectedDefault = $this->normalizeDefaultValue($columnInfo['default'] ?? null);
+        $actualDefault = $this->normalizeDefaultValue($existingColumn['COLUMN_DEFAULT']);
+        
+        if ($expectedDefault !== $actualDefault) {
+            return true;
+        }
+        
+        // 4. Comparer AUTO_INCREMENT (pour les colonnes ID)
+        $expectedAutoIncrement = ($columnInfo['autoIncrement'] ?? false);
+        $actualAutoIncrement = strpos(strtolower($existingColumn['EXTRA'] ?? ''), 'auto_increment') !== false;
+        
+        if ($expectedAutoIncrement !== $actualAutoIncrement) {
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Normalise les types SQL équivalents pour la comparaison
+     * 
+     * Cette méthode normalise les types SQL pour permettre une comparaison précise,
+     * en tenant compte des équivalences (TINYINT(1) = BOOLEAN, INTEGER = INT, etc.)
+     * et en préservant les longueurs/précisions.
+     * 
+     * @param string $type Type SQL à normaliser (ex: "TINYINT(1)", "VARCHAR(255)", "INT")
+     * @return string Type SQL normalisé pour comparaison
+     */
+    private function normalizeSQLTypeForComparison(string $type): string
+    {
+        // Normaliser la casse et les espaces
+        $type = strtoupper(trim($type));
+        
+        // Extraire le type de base et la longueur/précision si présente
+        if (preg_match('/^(\w+)(?:\((\d+)\))?$/', $type, $matches)) {
+            $baseType = $matches[1];
+            $length = $matches[2] ?? null;
+            
+            // Normaliser les types équivalents
+            // TINYINT(1) et BOOLEAN sont équivalents
+            if ($baseType === 'BOOLEAN' || ($baseType === 'TINYINT' && $length === '1')) {
+                return 'TINYINT(1)';
+            }
+            
+            // INTEGER = INT
+            if ($baseType === 'INTEGER') {
+                $baseType = 'INT';
+            }
+            
+            // Reconstruire le type normalisé
+            if ($length !== null) {
+                return $baseType . '(' . $length . ')';
+            }
+            
+            return $baseType;
+        }
+        
+        return $type;
+    }
+    
+    /**
+     * Normalise les valeurs par défaut pour la comparaison
+     * 
+     * @param mixed $default Valeur par défaut à normaliser
+     * @return string|null Valeur normalisée
+     */
+    private function normalizeDefaultValue($default): ?string
+    {
+        if ($default === null) {
+            return null;
+        }
+        
+        // Convertir les booléens en 0/1
+        if (is_bool($default)) {
+            return $default ? '1' : '0';
+        }
+        
+        // Normaliser les chaînes (enlever les guillemets)
+        if (is_string($default)) {
+            $normalized = trim($default, "'\"");
+            // Si c'est un nombre, le retourner tel quel
+            if (is_numeric($normalized)) {
+                return $normalized;
+            }
+            return $normalized;
+        }
+        
+        // Convertir en chaîne
+        return (string)$default;
     }
     
     /**
