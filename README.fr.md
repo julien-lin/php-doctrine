@@ -2,6 +2,10 @@
 
 [🇬🇧 Lire en anglais](README.md) | [🇫🇷 Lire en français](README.fr.md)
 
+## 💝 Soutenir le projet
+
+Si ce bundle vous est utile, envisagez de [devenir un sponsor](https://github.com/sponsors/julien-lin) pour soutenir le développement et la maintenance de ce projet open source.
+
 ---
 
 Un ORM (Object-Relational Mapping) moderne pour PHP 8+ inspiré de Doctrine, avec Entity Manager, Repository Pattern, Query Builder et mapping avec Attributes PHP 8.
