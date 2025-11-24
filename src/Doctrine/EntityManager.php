@@ -373,6 +373,7 @@ class EntityManager
             'date' => $value instanceof \DateTime ? $value->format('Y-m-d') : $value,
             'time' => $value instanceof \DateTime ? $value->format('H:i:s') : $value,
             'boolean', 'bool' => $value ? 1 : 0,
+            'json' => is_array($value) || is_object($value) ? json_encode($value) : $value,
             default => $value,
         };
     }

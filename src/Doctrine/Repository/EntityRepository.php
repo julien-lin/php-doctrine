@@ -217,6 +217,7 @@ class EntityRepository implements RepositoryInterface
             'datetime' => $value instanceof \DateTime ? $value : new \DateTime($value),
             'date' => $value instanceof \DateTime ? $value : \DateTime::createFromFormat('Y-m-d', $value),
             'time' => $value instanceof \DateTime ? $value : \DateTime::createFromFormat('H:i:s', $value),
+            'json' => is_string($value) ? json_decode($value, true) : $value,
             default => $value,
         };
     }
