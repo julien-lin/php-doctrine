@@ -8,6 +8,7 @@ use JulienLinard\Doctrine\Database\Connection;
 use JulienLinard\Doctrine\Metadata\MetadataReader;
 use JulienLinard\Doctrine\Repository\EntityRepository;
 use JulienLinard\Doctrine\Repository\RepositoryInterface;
+use JulienLinard\Doctrine\Validation\Validator;
 
 /**
  * Entity Manager - Gestionnaire principal des entités
@@ -16,6 +17,7 @@ class EntityManager
 {
     private Connection $connection;
     private MetadataReader $metadataReader;
+    private ?Validator $validator = null;
     
     /**
      * Entités en attente de persistance
@@ -42,6 +44,11 @@ class EntityManager
      * Clé : spl_object_hash($entity), Valeur : tableau des valeurs originales
      */
     private array $originalStates = [];
+    
+    /**
+     * Active ou désactive la validation automatique
+     */
+    private bool $validationEnabled = true;
 
     /**
      * Constructeur
@@ -61,6 +68,11 @@ class EntityManager
      */
     public function persist(object $entity): void
     {
+        // Valider l'entité si la validation est activée
+        if ($this->validationEnabled) {
+            $this->validate($entity);
+        }
+        
         $this->toPersist[] = $entity;
         
         // Si l'entité a un ID, sauvegarder son état original pour le dirty checking
@@ -78,6 +90,41 @@ class EntityManager
                 $this->originalStates[spl_object_hash($entity)] = $this->getEntityState($entity);
             }
         }
+    }
+    
+    /**
+     * Valide une entité
+     *
+     * @param object $entity Entité à valider
+     * @throws \JulienLinard\Doctrine\Validation\ValidationException Si la validation échoue
+     */
+    private function validate(object $entity): void
+    {
+        if ($this->validator === null) {
+            $this->validator = new Validator($this->metadataReader);
+        }
+        
+        $this->validator->validate($entity);
+    }
+    
+    /**
+     * Active ou désactive la validation automatique
+     *
+     * @param bool $enabled True pour activer, false pour désactiver
+     */
+    public function setValidationEnabled(bool $enabled): void
+    {
+        $this->validationEnabled = $enabled;
+    }
+    
+    /**
+     * Vérifie si la validation est activée
+     *
+     * @return bool True si la validation est activée
+     */
+    public function isValidationEnabled(): bool
+    {
+        return $this->validationEnabled;
     }
 
     /**
