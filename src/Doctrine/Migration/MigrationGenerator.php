@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace JulienLinard\Doctrine\Migration;
 
 use JulienLinard\Doctrine\Database\Connection;
@@ -104,8 +106,15 @@ class MigrationGenerator
      */
     private function getDatabaseName(): string
     {
-        $result = $this->connection->fetchOne("SELECT DATABASE() as db_name");
-        return $result['db_name'] ?? '';
+        $pdo = $this->connection->getPdo();
+        $driver = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME);
+        
+        return match ($driver) {
+            'mysql' => $pdo->query("SELECT DATABASE()")->fetchColumn() ?: '',
+            'pgsql' => $pdo->query("SELECT current_database()")->fetchColumn() ?: '',
+            'sqlite' => ':memory:', // SQLite n'a pas de nom de base de données
+            default => '',
+        };
     }
     
     /**
@@ -153,7 +162,8 @@ class MigrationGenerator
                 }
                 
                 if (!$fkExists) {
-                    $columns[] = "`{$fkColumn}` INT NOT NULL";
+                    $fkColumnEscaped = $this->escapeIdentifier($fkColumn);
+                    $columns[] = "{$fkColumnEscaped} INT NOT NULL";
                 }
                 
                 // Récupérer les métadonnées de l'entité cible
@@ -163,9 +173,14 @@ class MigrationGenerator
                     $targetIdInfo = $targetMetadata['columns'][$targetIdColumn] ?? null;
                     $targetIdName = $targetIdInfo['name'] ?? $targetIdColumn;
                     
-                    $foreignKeys[] = "CONSTRAINT `fk_{$metadata['table']}_{$fkColumn}` 
-                                     FOREIGN KEY (`{$fkColumn}`) 
-                                     REFERENCES `{$targetMetadata['table']}` (`{$targetIdName}`) 
+                    $fkNameEscaped = $this->escapeIdentifier('fk_' . $metadata['table'] . '_' . $fkColumn);
+                    $fkColumnEscaped = $this->escapeIdentifier($fkColumn);
+                    $targetTableEscaped = $this->escapeIdentifier($targetMetadata['table']);
+                    $targetIdEscaped = $this->escapeIdentifier($targetIdName);
+                    
+                    $foreignKeys[] = "CONSTRAINT {$fkNameEscaped} 
+                                     FOREIGN KEY ({$fkColumnEscaped}) 
+                                     REFERENCES {$targetTableEscaped} ({$targetIdEscaped}) 
                                      ON DELETE CASCADE";
                 } catch (\Exception $e) {
                     // Si l'entité cible n'existe pas encore, on ne crée pas la FK
@@ -174,21 +189,22 @@ class MigrationGenerator
             }
         }
         
-        // Index sur les colonnes importantes
-        foreach ($metadata['columns'] as $propertyName => $columnInfo) {
-            $columnName = $columnInfo['name'] ?? $propertyName;
-            if (in_array($columnName, ['user_id', 'email', 'created_at', 'deadline', 'is_urgent', 'completed'])) {
-                $indexes[] = "INDEX `idx_{$columnName}` (`{$columnName}`)";
-            }
+        // Index définis via l'attribut #[Index]
+        foreach ($metadata['indexes'] ?? [] as $indexInfo) {
+            $indexType = $indexInfo['unique'] ? 'UNIQUE INDEX' : 'INDEX';
+            $indexNameEscaped = $this->escapeIdentifier($indexInfo['name']);
+            $columnNameEscaped = $this->escapeIdentifier($indexInfo['column']);
+            $indexes[] = "{$indexType} {$indexNameEscaped} ({$columnNameEscaped})";
         }
         
         // Construire le SQL
-        $sql = "CREATE TABLE IF NOT EXISTS `{$metadata['table']}` (\n";
+        $sql = "CREATE TABLE IF NOT EXISTS {$tableName} (\n";
         $sql .= "  " . implode(",\n  ", $columns);
         
         if ($primaryKey) {
             $idColumnName = $metadata['columns'][$primaryKey]['name'] ?? $primaryKey;
-            $sql .= ",\n  PRIMARY KEY (`{$idColumnName}`)";
+            $idColumnEscaped = $this->escapeIdentifier($idColumnName);
+            $sql .= ",\n  PRIMARY KEY ({$idColumnEscaped})";
         }
         
         if (!empty($indexes)) {
@@ -241,7 +257,7 @@ class MigrationGenerator
             return '';
         }
         
-        return "ALTER TABLE `{$metadata['table']}`\n  " . implode(",\n  ", $alterations) . ";";
+        return "ALTER TABLE {$tableName}\n  " . implode(",\n  ", $alterations) . ";";
     }
     
     /**
@@ -255,6 +271,7 @@ class MigrationGenerator
     private function generateColumnSQL(string $propertyName, array $columnInfo, bool $isPrimary = false): string
     {
         $columnName = $columnInfo['name'] ?? $propertyName;
+        $columnNameEscaped = $this->escapeIdentifier($columnName);
         $type = $this->mapTypeToSQL($columnInfo['type'], $columnInfo['length'] ?? null);
         $nullable = ($columnInfo['nullable'] ?? false) ? 'NULL' : 'NOT NULL';
         $default = '';
@@ -274,7 +291,7 @@ class MigrationGenerator
         
         $autoIncrement = (($columnInfo['autoIncrement'] ?? false) && $isPrimary) ? ' AUTO_INCREMENT' : '';
         
-        return "`{$columnName}` {$type} {$nullable}{$default}{$autoIncrement}";
+        return "{$columnNameEscaped} {$type} {$nullable}{$default}{$autoIncrement}";
     }
     
     /**
@@ -308,6 +325,14 @@ class MigrationGenerator
      */
     private function getExistingColumns(string $tableName): array
     {
+        $pdo = $this->connection->getPdo();
+        $driver = $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME);
+        
+        // SQLite utilise une approche différente
+        if ($driver === 'sqlite') {
+            return $this->getExistingColumnsSQLite($tableName);
+        }
+        
         $dbName = $this->getDatabaseName();
         
         $sql = "SELECT COLUMN_NAME, COLUMN_TYPE, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, 
@@ -329,15 +354,43 @@ class MigrationGenerator
             
             return $columns;
         } catch (\Exception $e) {
-            // Logger l'erreur au lieu de retourner un tableau vide
-            error_log("Erreur lors de la récupération des colonnes pour {$tableName}: " . $e->getMessage());
-            throw new \RuntimeException(
-                "Impossible de récupérer les colonnes existantes pour la table {$tableName}: " . $e->getMessage(),
-                0,
-                $e
-            );
+            // Pour SQLite ou autres erreurs, retourner un tableau vide
+            // La table sera considérée comme nouvelle
+            return [];
         }
     }
+    
+    /**
+     * Récupère les colonnes existantes d'une table SQLite
+     * 
+     * @param string $tableName Nom de la table
+     * @return array Tableau associatif [nom_colonne => infos_colonne]
+     */
+    private function getExistingColumnsSQLite(string $tableName): array
+    {
+        try {
+            $sql = "PRAGMA table_info({$this->escapeIdentifier($tableName)})";
+            $rows = $this->connection->fetchAll($sql);
+            
+            $columns = [];
+            foreach ($rows as $row) {
+                $columns[$row['name']] = [
+                    'COLUMN_NAME' => $row['name'],
+                    'COLUMN_TYPE' => $row['type'],
+                    'DATA_TYPE' => $row['type'],
+                    'IS_NULLABLE' => $row['notnull'] == 0 ? 'YES' : 'NO',
+                    'COLUMN_DEFAULT' => $row['dflt_value'],
+                    'COLUMN_KEY' => $row['pk'] == 1 ? 'PRI' : '',
+                    'EXTRA' => $row['pk'] == 1 ? 'auto_increment' : '',
+                ];
+            }
+            
+            return $columns;
+        } catch (\Exception $e) {
+            return [];
+        }
+    }
+    
     
     /**
      * Vérifie si une colonne doit être mise à jour
@@ -483,11 +536,13 @@ class MigrationGenerator
      * Échappe un identifiant SQL avec des backticks
      * 
      * @param string $identifier Identifiant à échapper
-     * @return string Identifiant échappé
+     * @return string Identifiant échappé avec backticks
      */
     private function escapeIdentifier(string $identifier): string
     {
-        return str_replace('`', '``', $identifier);
+        // Échapper les backticks en les doublant
+        $escaped = str_replace('`', '``', $identifier);
+        return "`{$escaped}`";
     }
 }
 

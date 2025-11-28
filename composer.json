@@ -53,8 +53,8 @@
         }
     },
     "scripts": {
-        "test": "phpunit",
-        "test-coverage": "phpunit --coverage-text",
+        "test": "vendor/bin/phpunit",
+        "test-coverage": "vendor/bin/phpunit --coverage-text",
         "doctrine-migrate": "php bin/doctrine-migrate"
     },
     "bin": [
