@@ -91,6 +91,26 @@ try {
 }
 
 /**
+ * Détecte si une requête SQL est une commande DDL
+ * 
+ * @param string $sql Requête SQL à analyser
+ * @return bool True si c'est une commande DDL
+ */
+function isDDLStatement(string $sql): bool
+{
+    $sql = trim($sql);
+    $ddlKeywords = ['CREATE', 'DROP', 'ALTER', 'TRUNCATE', 'RENAME'];
+    
+    foreach ($ddlKeywords as $keyword) {
+        if (stripos($sql, $keyword) === 0) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+/**
  * Charge la configuration de la base de données
  */
 function loadDatabaseConfig(): ?array
@@ -245,6 +265,9 @@ function executeMigrations(EntityManager $em): void
         return;
     }
     
+    // Trier les migrations par nom (chronologique)
+    sort($files);
+    
     $manager = $em->getMigrationManager();
     $runner = $em->getMigrationRunner();
     $executed = $manager->getExecutedMigrations();
@@ -269,8 +292,20 @@ function executeMigrations(EntityManager $em): void
         
         $sql = file_get_contents($migration['file']);
         
+        if (empty(trim($sql))) {
+            echo "⚠️  Migration vide, ignorée.\n\n";
+            continue;
+        }
+        
         try {
-            $runner->run($sql);
+            // Détecter automatiquement les DDL et désactiver les transactions
+            $useTransaction = !isDDLStatement(trim($sql));
+            
+            if (!$useTransaction) {
+                echo "💡 DDL détecté, transaction désactivée.\n";
+            }
+            
+            $runner->run($sql, $useTransaction);
             $manager->markAsExecuted($migration['name']);
             echo "✅ Migration {$migration['name']} appliquée avec succès.\n\n";
         } catch (\Exception $e) {
@@ -302,14 +337,22 @@ function showStatus(EntityManager $em): void
     
     foreach ($files as $file) {
         $migrationName = basename($file, '.sql');
-        $status = in_array($migrationName, $executed) ? '✅ Appliquée' : '⏳ En attente';
+        $isExecuted = in_array($migrationName, $executed);
+        $status = $isExecuted ? '✅ Appliquée' : '⏳ En attente';
+        
+        if ($isExecuted) {
+            $applied++;
+        } else {
+            $pending++;
+        }
+        
         echo "{$migrationName} : {$status}\n";
     }
     
     echo "\n";
     echo "Total : " . count($files) . " migration(s)\n";
-    echo "Appliquées : " . count($executed) . "\n";
-    echo "En attente : " . (count($files) - count($executed)) . "\n";
+    echo "Appliquées : {$applied}\n";
+    echo "En attente : {$pending}\n";
 }
 
 /**

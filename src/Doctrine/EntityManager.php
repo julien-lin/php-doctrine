@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace JulienLinard\Doctrine;
 
 use JulienLinard\Doctrine\Database\Connection;
@@ -34,6 +36,12 @@ class EntityManager
      * Cache des instances ReflectionClass
      */
     private array $reflectionCache = [];
+    
+    /**
+     * État original des entités chargées (pour dirty checking)
+     * Clé : spl_object_hash($entity), Valeur : tableau des valeurs originales
+     */
+    private array $originalStates = [];
 
     /**
      * Constructeur
@@ -54,6 +62,22 @@ class EntityManager
     public function persist(object $entity): void
     {
         $this->toPersist[] = $entity;
+        
+        // Si l'entité a un ID, sauvegarder son état original pour le dirty checking
+        $className = get_class($entity);
+        $metadata = $this->metadataReader->getMetadata($className);
+        
+        if ($metadata['id'] !== null) {
+            $reflection = $this->getReflectionClass($entity);
+            $idProperty = $reflection->getProperty($metadata['id']);
+            $idProperty->setAccessible(true);
+            $id = $idProperty->getValue($entity);
+            
+            // Si l'entité a un ID, sauvegarder l'état original
+            if ($id !== null && $id !== 0 && !isset($this->originalStates[spl_object_hash($entity)])) {
+                $this->originalStates[spl_object_hash($entity)] = $this->getEntityState($entity);
+            }
+        }
     }
 
     /**
@@ -100,6 +124,8 @@ class EntityManager
         // Supprimer les entités marquées
         foreach ($this->toRemove as $entity) {
             $this->deleteEntity($entity);
+            // Nettoyer l'état original après suppression
+            unset($this->originalStates[spl_object_hash($entity)]);
         }
         $this->toRemove = [];
     }
@@ -182,6 +208,7 @@ class EntityManager
 
     /**
      * Met à jour une entité en base de données
+     * Utilise le dirty checking pour ne mettre à jour que les propriétés modifiées
      */
     private function updateEntity(object $entity): void
     {
@@ -205,6 +232,11 @@ class EntityManager
         
         $idColumn = $metadata['columns'][$idPropertyName]['name'] ?? $idPropertyName;
         
+        // Récupérer l'état original pour le dirty checking
+        $entityHash = spl_object_hash($entity);
+        $originalState = $this->originalStates[$entityHash] ?? null;
+        $currentState = $this->getEntityState($entity);
+        
         foreach ($metadata['columns'] as $propertyName => $columnInfo) {
             // Ignorer l'ID dans les SET
             if ($propertyName === $idPropertyName) {
@@ -220,9 +252,25 @@ class EntityManager
                 continue;
             }
             
+            // Dirty checking : ne mettre à jour que si la valeur a changé
+            if ($originalState !== null) {
+                $originalValue = $originalState[$propertyName] ?? null;
+                $currentValue = $currentState[$propertyName] ?? null;
+                
+                // Comparer les valeurs (en tenant compte des types)
+                if ($this->valuesAreEqual($originalValue, $currentValue, $columnInfo['type'])) {
+                    continue; // La valeur n'a pas changé, ne pas l'inclure dans l'UPDATE
+                }
+            }
+            
             $columnName = $columnInfo['name'];
             $sets[] = $this->escapeIdentifier($columnName) . " = :{$columnName}";
             $params[$columnName] = $this->convertToDatabaseValue($value, $columnInfo['type']);
+        }
+        
+        // Si aucune propriété n'a changé, ne pas exécuter l'UPDATE
+        if (empty($sets)) {
+            return;
         }
         
         // Ajouter l'ID dans les paramètres pour la clause WHERE
@@ -231,6 +279,87 @@ class EntityManager
         
         $sql = "UPDATE {$tableName} SET " . implode(', ', $sets) . " WHERE {$idColumnEscaped} = :id";
         $this->connection->execute($sql, $params);
+        
+        // Mettre à jour l'état original après la mise à jour
+        $this->originalStates[$entityHash] = $currentState;
+    }
+    
+    /**
+     * Récupère l'état actuel d'une entité (toutes les valeurs des propriétés)
+     * 
+     * @param object $entity Entité
+     * @return array État de l'entité [propertyName => value]
+     */
+    private function getEntityState(object $entity): array
+    {
+        $className = get_class($entity);
+        $metadata = $this->metadataReader->getMetadata($className);
+        $reflection = $this->getReflectionClass($entity);
+        $state = [];
+        
+        foreach ($metadata['columns'] as $propertyName => $columnInfo) {
+            $property = $reflection->getProperty($propertyName);
+            $property->setAccessible(true);
+            $value = $property->getValue($entity);
+            
+            // Normaliser les valeurs pour la comparaison
+            $state[$propertyName] = $this->normalizeValueForComparison($value, $columnInfo['type']);
+        }
+        
+        return $state;
+    }
+    
+    /**
+     * Normalise une valeur pour la comparaison
+     * 
+     * @param mixed $value Valeur à normaliser
+     * @param string $type Type de la colonne
+     * @return mixed Valeur normalisée
+     */
+    private function normalizeValueForComparison(mixed $value, string $type): mixed
+    {
+        if ($value === null) {
+            return null;
+        }
+        
+        return match ($type) {
+            'boolean', 'bool' => (bool)$value,
+            'integer', 'int' => (int)$value,
+            'float', 'double' => (float)$value,
+            'datetime' => $value instanceof \DateTime ? $value->format('Y-m-d H:i:s') : (string)$value,
+            'date' => $value instanceof \DateTime ? $value->format('Y-m-d') : (string)$value,
+            'time' => $value instanceof \DateTime ? $value->format('H:i:s') : (string)$value,
+            'json' => is_string($value) ? $value : json_encode($value),
+            default => (string)$value,
+        };
+    }
+    
+    /**
+     * Compare deux valeurs pour déterminer si elles sont égales
+     * 
+     * @param mixed $value1 Première valeur
+     * @param mixed $value2 Deuxième valeur
+     * @param string $type Type de la colonne
+     * @return bool True si les valeurs sont égales
+     */
+    private function valuesAreEqual(mixed $value1, mixed $value2, string $type): bool
+    {
+        // Les deux sont null
+        if ($value1 === null && $value2 === null) {
+            return true;
+        }
+        
+        // L'un est null et l'autre non
+        if ($value1 === null || $value2 === null) {
+            return false;
+        }
+        
+        // Normaliser les valeurs pour la comparaison
+        $normalized1 = $this->normalizeValueForComparison($value1, $type);
+        $normalized2 = $this->normalizeValueForComparison($value2, $type);
+        
+        // Comparaison stricte
+        return $normalized1 === $normalized2;
     }
 
     /**
@@ -270,7 +399,14 @@ class EntityManager
      */
     public function find(string $entityClass, int|string $id): ?object
     {
-        return $this->getRepository($entityClass)->find($id);
+        $entity = $this->getRepository($entityClass)->find($id);
+        
+        // Enregistrer l'état original pour le dirty checking
+        if ($entity !== null) {
+            $this->registerOriginalState($entity);
+        }
+        
+        return $entity;
     }
 
     /**
@@ -392,6 +528,53 @@ class EntityManager
     public function getMetadataReader(): MetadataReader
     {
         return $this->metadataReader;
+    }
+    
+    /**
+     * Enregistre l'état original d'une entité chargée depuis la base de données
+     * Cette méthode est utilisée par les repositories pour activer le dirty checking
+     * 
+     * @param object $entity Entité chargée
+     */
+    public function registerOriginalState(object $entity): void
+    {
+        $entityHash = spl_object_hash($entity);
+        if (!isset($this->originalStates[$entityHash])) {
+            $this->originalStates[$entityHash] = $this->getEntityState($entity);
+        }
+    }
+    
+    /**
+     * Vérifie si une entité a été modifiée (dirty checking)
+     * 
+     * @param object $entity Entité à vérifier
+     * @return bool True si l'entité a été modifiée
+     */
+    public function isDirty(object $entity): bool
+    {
+        $entityHash = spl_object_hash($entity);
+        
+        // Si l'entité n'a pas d'état original, elle est considérée comme nouvelle (dirty)
+        if (!isset($this->originalStates[$entityHash])) {
+            return true;
+        }
+        
+        $originalState = $this->originalStates[$entityHash];
+        $currentState = $this->getEntityState($entity);
+        $className = get_class($entity);
+        $metadata = $this->metadataReader->getMetadata($className);
+        
+        // Comparer chaque propriété
+        foreach ($metadata['columns'] as $propertyName => $columnInfo) {
+            $originalValue = $originalState[$propertyName] ?? null;
+            $currentValue = $currentState[$propertyName] ?? null;
+            
+            if (!$this->valuesAreEqual($originalValue, $currentValue, $columnInfo['type'])) {
+                return true; // L'entité a été modifiée
+            }
+        }
+        
+        return false; // L'entité n'a pas été modifiée
     }
 
     /**

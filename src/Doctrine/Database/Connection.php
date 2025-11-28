@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace JulienLinard\Doctrine\Database;
 
 use PDO;
@@ -158,11 +160,14 @@ class Connection
      */
     public function beginTransaction(): void
     {
-        if ($this->inTransaction) {
+        $pdo = $this->getPdo();
+        
+        // Vérifier via PDO directement pour éviter les désynchronisations
+        if ($pdo->inTransaction()) {
             throw new \RuntimeException('Une transaction est déjà en cours.');
         }
         
-        $this->getPdo()->beginTransaction();
+        $pdo->beginTransaction();
         $this->inTransaction = true;
     }
 
@@ -171,11 +176,14 @@ class Connection
      */
     public function commit(): void
     {
-        if (!$this->inTransaction) {
+        $pdo = $this->getPdo();
+        
+        // Vérifier via PDO directement pour éviter les désynchronisations
+        if (!$pdo->inTransaction()) {
             throw new \RuntimeException('Aucune transaction en cours.');
         }
         
-        $this->getPdo()->commit();
+        $pdo->commit();
         $this->inTransaction = false;
     }
 
@@ -184,20 +192,38 @@ class Connection
      */
     public function rollback(): void
     {
-        if (!$this->inTransaction) {
+        $pdo = $this->getPdo();
+        
+        // Vérifier via PDO directement pour éviter les désynchronisations
+        if (!$pdo->inTransaction()) {
             throw new \RuntimeException('Aucune transaction en cours.');
         }
         
-        $this->getPdo()->rollBack();
+        $pdo->rollBack();
         $this->inTransaction = false;
     }
 
     /**
      * Vérifie si une transaction est en cours
+     * 
+     * Utilise PDO::inTransaction() pour une vérification fiable
+     * et synchronise l'état local si nécessaire
      */
     public function inTransaction(): bool
     {
-        return $this->inTransaction;
+        if ($this->pdo === null) {
+            return false;
+        }
+        
+        // Utiliser PDO::inTransaction() pour une vérification fiable
+        $pdoInTransaction = $this->pdo->inTransaction();
+        
+        // Synchroniser l'état local si nécessaire
+        if ($pdoInTransaction !== $this->inTransaction) {
+            $this->inTransaction = $pdoInTransaction;
+        }
+        
+        return $pdoInTransaction;
     }
 
     /**
