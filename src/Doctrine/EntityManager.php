@@ -95,31 +95,56 @@ class EntityManager
      */
     public function flush(): void
     {
-        // Persister les nouvelles entités ou mettre à jour les existantes
-        foreach ($this->toPersist as $entity) {
-            $className = get_class($entity);
-            $metadata = $this->metadataReader->getMetadata($className);
+        // Gérer les cascades persist avant de persister les entités principales
+        $this->processCascadePersist();
+        
+        // Trier les entités à persister : d'abord celles sans relations ManyToOne, puis les autres
+        $entitiesToPersist = $this->toPersist;
+        $processed = [];
+        
+        while (!empty($entitiesToPersist)) {
+            $progressMade = false;
             
-            // Vérifier si l'entité a un ID (mise à jour) ou non (insertion)
-            if ($metadata['id'] !== null) {
-                $reflection = $this->getReflectionClass($entity);
-                $idProperty = $reflection->getProperty($metadata['id']);
-                $idProperty->setAccessible(true);
-                $id = $idProperty->getValue($entity);
-                
-                if ($id !== null && $id !== 0) {
-                    // L'entité a un ID, c'est une mise à jour
-                    $this->updateEntity($entity);
-                } else {
-                    // L'entité n'a pas d'ID, c'est une insertion
-                    $this->insertEntity($entity);
+            foreach ($entitiesToPersist as $key => $entity) {
+                $entityHash = spl_object_hash($entity);
+                if (isset($processed[$entityHash])) {
+                    unset($entitiesToPersist[$key]);
+                    continue;
                 }
-            } else {
-                // Pas d'ID défini, insertion
-                $this->insertEntity($entity);
+                
+                // Vérifier si toutes les entités ManyToOne liées sont déjà persistées
+                $className = get_class($entity);
+                $metadata = $this->metadataReader->getMetadata($className);
+                $canPersist = true;
+                
+                foreach ($metadata['relations'] ?? [] as $relation) {
+                    if ($relation['type'] === 'ManyToOne') {
+                        // Vérifier si l'entité liée est dans toPersist et non encore persistée
+                        // Pour simplifier, on persiste toujours (les relations seront gérées dans insertEntity)
+                    }
+                }
+                
+                if ($canPersist) {
+                    $this->persistEntity($entity);
+                    $processed[$entityHash] = true;
+                    unset($entitiesToPersist[$key]);
+                    $progressMade = true;
+                }
+            }
+            
+            // Si aucun progrès n'a été fait, forcer la persistance (pour éviter les boucles infinies)
+            if (!$progressMade && !empty($entitiesToPersist)) {
+                foreach ($entitiesToPersist as $entity) {
+                    $this->persistEntity($entity);
+                }
+                break;
             }
         }
+        
         $this->toPersist = [];
+
+        // Gérer les cascades remove avant de supprimer les entités principales
+        $this->processCascadeRemove();
 
         // Supprimer les entités marquées
         foreach ($this->toRemove as $entity) {
@@ -128,6 +153,154 @@ class EntityManager
             unset($this->originalStates[spl_object_hash($entity)]);
         }
         $this->toRemove = [];
+    }
+    
+    /**
+     * Persiste une entité (insertion ou mise à jour)
+     */
+    private function persistEntity(object $entity): void
+    {
+        $className = get_class($entity);
+        $metadata = $this->metadataReader->getMetadata($className);
+        
+        // Vérifier si l'entité a un ID (mise à jour) ou non (insertion)
+        if ($metadata['id'] !== null) {
+            $reflection = $this->getReflectionClass($entity);
+            $idProperty = $reflection->getProperty($metadata['id']);
+            $idProperty->setAccessible(true);
+            $id = $idProperty->getValue($entity);
+            
+            if ($id !== null && $id !== 0) {
+                // L'entité a un ID, c'est une mise à jour
+                $this->updateEntity($entity);
+            } else {
+                // L'entité n'a pas d'ID, c'est une insertion
+                $this->insertEntity($entity);
+            }
+        } else {
+            // Pas d'ID défini, insertion
+            $this->insertEntity($entity);
+        }
+    }
+    
+    /**
+     * Traite les cascades persist
+     */
+    private function processCascadePersist(): void
+    {
+        $processed = [];
+        
+        foreach ($this->toPersist as $entity) {
+            $this->processCascadePersistForEntity($entity, $processed);
+        }
+    }
+    
+    /**
+     * Traite les cascades persist pour une entité
+     */
+    private function processCascadePersistForEntity(object $entity, array &$processed): void
+    {
+        $entityHash = spl_object_hash($entity);
+        if (isset($processed[$entityHash])) {
+            return;
+        }
+        $processed[$entityHash] = true;
+        
+        $className = get_class($entity);
+        $metadata = $this->metadataReader->getMetadata($className);
+        $reflection = $this->getReflectionClass($entity);
+        
+        foreach ($metadata['relations'] ?? [] as $propertyName => $relation) {
+            if (!in_array('persist', $relation['cascade'] ?? [], true)) {
+                continue;
+            }
+            
+            $property = $reflection->getProperty($propertyName);
+            $property->setAccessible(true);
+            $value = $property->getValue($entity);
+            
+            if ($value === null) {
+                continue;
+            }
+            
+            if ($relation['type'] === 'OneToMany' || $relation['type'] === 'ManyToMany') {
+                // Collection d'entités
+                if (is_array($value)) {
+                    foreach ($value as $relatedEntity) {
+                        if (is_object($relatedEntity)) {
+                            $this->toPersist[] = $relatedEntity;
+                            $this->processCascadePersistForEntity($relatedEntity, $processed);
+                        }
+                    }
+                }
+            } else {
+                // Entité unique
+                if (is_object($value)) {
+                    $this->toPersist[] = $value;
+                    $this->processCascadePersistForEntity($value, $processed);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Traite les cascades remove
+     */
+    private function processCascadeRemove(): void
+    {
+        $processed = [];
+        
+        foreach ($this->toRemove as $entity) {
+            $this->processCascadeRemoveForEntity($entity, $processed);
+        }
+    }
+    
+    /**
+     * Traite les cascades remove pour une entité
+     */
+    private function processCascadeRemoveForEntity(object $entity, array &$processed): void
+    {
+        $entityHash = spl_object_hash($entity);
+        if (isset($processed[$entityHash])) {
+            return;
+        }
+        $processed[$entityHash] = true;
+        
+        $className = get_class($entity);
+        $metadata = $this->metadataReader->getMetadata($className);
+        $reflection = $this->getReflectionClass($entity);
+        
+        foreach ($metadata['relations'] ?? [] as $propertyName => $relation) {
+            if (!in_array('remove', $relation['cascade'] ?? [], true)) {
+                continue;
+            }
+            
+            $property = $reflection->getProperty($propertyName);
+            $property->setAccessible(true);
+            $value = $property->getValue($entity);
+            
+            if ($value === null) {
+                continue;
+            }
+            
+            if ($relation['type'] === 'OneToMany' || $relation['type'] === 'ManyToMany') {
+                // Collection d'entités
+                if (is_array($value)) {
+                    foreach ($value as $relatedEntity) {
+                        if (is_object($relatedEntity)) {
+                            $this->toRemove[] = $relatedEntity;
+                            $this->processCascadeRemoveForEntity($relatedEntity, $processed);
+                        }
+                    }
+                }
+            } else {
+                // Entité unique
+                if (is_object($value)) {
+                    $this->toRemove[] = $value;
+                    $this->processCascadeRemoveForEntity($value, $processed);
+                }
+            }
+        }
     }
 
     /**
@@ -189,6 +362,47 @@ class EntityManager
             $columns[] = $this->escapeIdentifier($columnName);
             $values[] = ":{$columnName}";
             $params[$columnName] = $this->convertToDatabaseValue($value, $columnInfo['type']);
+        }
+        
+        // Gérer les relations ManyToOne : extraire l'ID de l'entité liée
+        foreach ($metadata['relations'] ?? [] as $propertyName => $relation) {
+            if ($relation['type'] !== 'ManyToOne') {
+                continue;
+            }
+            
+            $property = $reflection->getProperty($propertyName);
+            $property->setAccessible(true);
+            $relatedEntity = $property->getValue($entity);
+            
+            if ($relatedEntity !== null && is_object($relatedEntity)) {
+                // Extraire l'ID de l'entité liée
+                $relatedMetadata = $this->metadataReader->getMetadata($relation['targetEntity']);
+                $relatedReflection = $this->getReflectionClass($relatedEntity);
+                $relatedIdProperty = $relatedReflection->getProperty($relatedMetadata['id']);
+                $relatedIdProperty->setAccessible(true);
+                $relatedId = $relatedIdProperty->getValue($relatedEntity);
+                
+                // Si l'entité liée n'a pas d'ID, la persister d'abord
+                if ($relatedId === null || $relatedId === 0) {
+                    $this->insertEntity($relatedEntity);
+                    $relatedId = $relatedIdProperty->getValue($relatedEntity);
+                }
+                
+                if ($relatedId !== null) {
+                    $joinColumn = $relation['joinColumn'];
+                    $joinColumnEscaped = $this->escapeIdentifier($joinColumn);
+                    
+                    // Vérifier si la colonne n'existe pas déjà dans les colonnes
+                    if (!in_array($joinColumnEscaped, $columns)) {
+                        $columns[] = $joinColumnEscaped;
+                        $values[] = ":{$joinColumn}";
+                        $params[$joinColumn] = $relatedId;
+                    } else {
+                        // Mettre à jour la valeur existante
+                        $params[$joinColumn] = $relatedId;
+                    }
+                }
+            }
         }
         
         $sql = "INSERT INTO {$tableName} (" . implode(', ', $columns) . ") VALUES (" . implode(', ', $values) . ")";
@@ -407,6 +621,34 @@ class EntityManager
         }
         
         return $entity;
+    }
+    
+    /**
+     * Charge les relations OneToMany d'une entité (lazy loading)
+     * 
+     * @param object $entity Entité
+     * @param string|null $relationName Nom de la relation à charger (null = toutes)
+     */
+    public function loadRelations(object $entity, ?string $relationName = null): void
+    {
+        $className = get_class($entity);
+        $repository = $this->getRepository($className);
+        
+        if ($repository instanceof EntityRepository) {
+            if ($relationName !== null) {
+                // Charger une relation spécifique
+                $metadata = $this->metadataReader->getMetadata($className);
+                if (isset($metadata['relations'][$relationName])) {
+                    $relation = $metadata['relations'][$relationName];
+                    if ($relation['type'] === 'OneToMany') {
+                        $repository->loadOneToManyRelations($entity);
+                    }
+                }
+            } else {
+                // Charger toutes les relations OneToMany
+                $repository->loadOneToManyRelations($entity);
+            }
+        }
     }
 
     /**

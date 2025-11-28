@@ -18,11 +18,13 @@ class ManyToOne
      * @param string $targetEntity Classe de l'entité cible
      * @param string|null $inversedBy Nom de la propriété dans l'entité cible (pour relation bidirectionnelle)
      * @param string|null $joinColumn Nom de la colonne de jointure (clé étrangère)
+     * @param array $cascade Opérations en cascade (persist, remove, merge, refresh)
      */
     public function __construct(
         public string $targetEntity,
         public ?string $inversedBy = null,
-        public ?string $joinColumn = null
+        public ?string $joinColumn = null,
+        public array $cascade = []
     ) {
     }
 }

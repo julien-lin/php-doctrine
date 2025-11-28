@@ -100,6 +100,7 @@ class MetadataReader
                     'targetEntity' => $manyToOneAttribute->targetEntity,
                     'inversedBy' => $manyToOneAttribute->inversedBy,
                     'joinColumn' => $manyToOneAttribute->joinColumn ?? $propertyName . '_id',
+                    'cascade' => $manyToOneAttribute->cascade ?? [],
                 ];
             }
 
@@ -111,6 +112,7 @@ class MetadataReader
                     'type' => 'OneToMany',
                     'targetEntity' => $oneToManyAttribute->targetEntity,
                     'mappedBy' => $oneToManyAttribute->mappedBy,
+                    'cascade' => $oneToManyAttribute->cascade ?? [],
                 ];
             }
 

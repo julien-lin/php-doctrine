@@ -74,6 +74,19 @@ class MigrationRunner
     }
     
     /**
+     * Exécute un rollback (annule une migration)
+     * 
+     * @param string $sql SQL à exécuter pour annuler la migration
+     * @param bool $useTransaction Utiliser une transaction (défaut: true)
+     * @throws MigrationException Si l'exécution échoue
+     */
+    public function rollback(string $sql, bool $useTransaction = true): void
+    {
+        // Utiliser la même logique que run()
+        $this->run($sql, $useTransaction);
+    }
+    
+    /**
      * Sépare les requêtes SQL multiples en tenant compte des chaînes
      * 
      * @param string $sql SQL contenant potentiellement plusieurs requêtes
