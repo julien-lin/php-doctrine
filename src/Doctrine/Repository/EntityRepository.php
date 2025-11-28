@@ -200,7 +200,132 @@ class EntityRepository implements RepositoryInterface
             }
         }
 
+        // Charger les relations ManyToOne si elles existent
+        $this->loadManyToOneRelations($entity, $row);
+        
         return $entity;
+    }
+    
+    /**
+     * Charge les relations ManyToOne d'une entité
+     * 
+     * @param object $entity Entité
+     * @param array $row Données de la base
+     */
+    private function loadManyToOneRelations(object $entity, array $row): void
+    {
+        $metadata = $this->metadataReader->getMetadata($this->entityClass);
+        $reflection = new ReflectionClass($this->entityClass);
+        
+        foreach ($metadata['relations'] ?? [] as $propertyName => $relation) {
+            if ($relation['type'] !== 'ManyToOne') {
+                continue;
+            }
+            
+            $joinColumn = $relation['joinColumn'];
+            if (!isset($row[$joinColumn]) || $row[$joinColumn] === null) {
+                continue;
+            }
+            
+            // Charger l'entité liée
+            $targetRepository = new EntityRepository(
+                $this->connection,
+                $this->metadataReader,
+                $relation['targetEntity']
+            );
+            
+            $relatedEntity = $targetRepository->find($row[$joinColumn]);
+            
+            if ($relatedEntity !== null) {
+                $property = $reflection->getProperty($propertyName);
+                $property->setAccessible(true);
+                $property->setValue($entity, $relatedEntity);
+            }
+        }
+    }
+    
+    /**
+     * Charge les relations OneToMany d'une entité
+     * 
+     * @param object $entity Entité
+     * @return void
+     */
+    public function loadOneToManyRelations(object $entity): void
+    {
+        $metadata = $this->metadataReader->getMetadata($this->entityClass);
+        $reflection = new ReflectionClass($this->entityClass);
+        
+        // Récupérer l'ID de l'entité
+        $idProperty = $reflection->getProperty($metadata['id']);
+        $idProperty->setAccessible(true);
+        $entityId = $idProperty->getValue($entity);
+        
+        if ($entityId === null) {
+            return;
+        }
+        
+        foreach ($metadata['relations'] ?? [] as $propertyName => $relation) {
+            if ($relation['type'] !== 'OneToMany') {
+                continue;
+            }
+            
+            // Charger les entités liées
+            $targetRepository = new EntityRepository(
+                $this->connection,
+                $this->metadataReader,
+                $relation['targetEntity']
+            );
+            
+            $targetMetadata = $this->metadataReader->getMetadata($relation['targetEntity']);
+            $mappedBy = $relation['mappedBy'];
+            
+            // Trouver la colonne de jointure dans l'entité cible
+            $joinColumn = null;
+            foreach ($targetMetadata['relations'] ?? [] as $targetProp => $targetRel) {
+                if ($targetRel['type'] === 'ManyToOne' && $targetRel['joinColumn']) {
+                    $joinColumn = $targetRel['joinColumn'];
+                    break;
+                }
+            }
+            
+            if ($joinColumn === null) {
+                $joinColumn = $mappedBy . '_id';
+            }
+            
+            // Rechercher les entités liées
+            $relatedEntities = $targetRepository->findBy([$joinColumn => $entityId]);
+            
+            // Définir la propriété
+            $property = $reflection->getProperty($propertyName);
+            $property->setAccessible(true);
+            $property->setValue($entity, $relatedEntities);
+        }
+    }
+    
+    /**
+     * Trouve toutes les entités avec leurs relations chargées (eager loading)
+     * 
+     * @param array $relations Liste des relations à charger (ex: ['posts', 'comments'])
+     * @return array Tableau d'entités avec relations chargées
+     */
+    public function findAllWith(array $relations = []): array
+    {
+        $entities = $this->findAll();
+        
+        foreach ($entities as $entity) {
+            // Charger les relations OneToMany demandées
+            foreach ($relations as $relationName) {
+                $metadata = $this->metadataReader->getMetadata($this->entityClass);
+                if (isset($metadata['relations'][$relationName])) {
+                    $relation = $metadata['relations'][$relationName];
+                    if ($relation['type'] === 'OneToMany') {
+                        $this->loadOneToManyRelations($entity);
+                    }
+                }
+            }
+        }
+        
+        return $entities;
     }
 
     /**

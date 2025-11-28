@@ -75,14 +75,23 @@ try {
 $action = $argv[1] ?? 'status';
 $entityClass = $argv[2] ?? null;
 
+// Récupérer les options (pour --steps)
+$options = [];
+for ($i = 2; $i < $argc; $i++) {
+    if (strpos($argv[$i], '--steps=') === 0) {
+        $options['steps'] = (int)substr($argv[$i], 8);
+    }
+}
+
 try {
     match ($action) {
         'generate' => generateMigration($em, $entityClass),
         'migrate' => executeMigrations($em),
+        'rollback' => rollbackMigrations($em, $options['steps'] ?? null),
         'status' => showStatus($em),
         'help' => showHelp(),
         default => throw new \InvalidArgumentException(
-            "Action inconnue : {$action}. Utilisez 'generate', 'migrate', 'status' ou 'help'"
+            "Action inconnue : {$action}. Utilisez 'generate', 'migrate', 'rollback', 'status' ou 'help'"
         )
     };
 } catch (\Exception $e) {
@@ -318,6 +327,188 @@ function executeMigrations(EntityManager $em): void
 }
 
 /**
+ * Annule les migrations (rollback)
+ */
+function rollbackMigrations(EntityManager $em, ?int $steps = null): void
+{
+    echo "🔄 Rollback des migrations...\n\n";
+    
+    $manager = $em->getMigrationManager();
+    $runner = $em->getMigrationRunner();
+    
+    // Récupérer les migrations à annuler
+    $migrationsToRollback = $manager->getMigrationsToRollback($steps);
+    
+    if (empty($migrationsToRollback)) {
+        echo "✅ Aucune migration à annuler.\n";
+        return;
+    }
+    
+    $count = count($migrationsToRollback);
+    if ($steps !== null) {
+        echo "📋 Annulation de {$count} migration(s)...\n\n";
+    } else {
+        echo "📋 Annulation de la dernière migration...\n\n";
+    }
+    
+    $migrationsPath = getcwd() . '/migrations';
+    
+    foreach ($migrationsToRollback as $migrationName) {
+        echo "⏪ Annulation de {$migrationName}...\n";
+        
+        // Chercher le fichier de migration
+        $migrationFile = $migrationsPath . '/' . $migrationName . '.sql';
+        
+        if (!file_exists($migrationFile)) {
+            // Essayer de charger une classe de migration
+            $migrationClass = loadMigrationClass($migrationName);
+            
+            if ($migrationClass === null) {
+                echo "⚠️  Fichier de migration non trouvé : {$migrationFile}\n";
+                echo "   Tentative de rollback automatique...\n";
+                
+                // Rollback automatique basé sur le nom de la migration
+                $rollbackSql = generateAutomaticRollback($migrationName, $em);
+                
+                if (empty($rollbackSql)) {
+                    echo "❌ Impossible de générer un rollback automatique pour {$migrationName}\n";
+                    echo "   Créez un fichier {$migrationName}_down.sql ou une classe MigrationInterface\n";
+                    continue;
+                }
+                
+                try {
+                    $useTransaction = !isDDLStatement(trim($rollbackSql));
+                    $runner->rollback($rollbackSql, $useTransaction);
+                    $manager->markAsRolledBack($migrationName);
+                    echo "✅ Migration {$migrationName} annulée avec succès.\n\n";
+                } catch (\Exception $e) {
+                    echo "❌ Erreur lors du rollback de {$migrationName} : {$e->getMessage()}\n";
+                    exit(1);
+                }
+                
+                continue;
+            }
+            
+            // Utiliser la classe de migration
+            if ($migrationClass instanceof \JulienLinard\Doctrine\Migration\MigrationInterface) {
+                $rollbackSql = $migrationClass->down();
+                
+                try {
+                    $useTransaction = !isDDLStatement(trim($rollbackSql));
+                    $runner->rollback($rollbackSql, $useTransaction);
+                    $manager->markAsRolledBack($migrationName);
+                    echo "✅ Migration {$migrationName} annulée avec succès.\n\n";
+                } catch (\Exception $e) {
+                    echo "❌ Erreur lors du rollback de {$migrationName} : {$e->getMessage()}\n";
+                    exit(1);
+                }
+                
+                continue;
+            }
+        }
+        
+        // Chercher un fichier _down.sql
+        $downFile = $migrationsPath . '/' . $migrationName . '_down.sql';
+        
+        if (file_exists($downFile)) {
+            $rollbackSql = file_get_contents($downFile);
+        } else {
+            // Rollback automatique basé sur le contenu du fichier up
+            $upSql = file_get_contents($migrationFile);
+            $rollbackSql = generateAutomaticRollback($migrationName, $em, $upSql);
+            
+            if (empty($rollbackSql)) {
+                echo "❌ Impossible de générer un rollback automatique pour {$migrationName}\n";
+                echo "   Créez un fichier {$migrationName}_down.sql\n";
+                continue;
+            }
+        }
+        
+        if (empty(trim($rollbackSql))) {
+            echo "⚠️  Rollback vide, ignoré.\n\n";
+            continue;
+        }
+        
+        try {
+            // Détecter automatiquement les DDL et désactiver les transactions
+            $useTransaction = !isDDLStatement(trim($rollbackSql));
+            
+            if (!$useTransaction) {
+                echo "💡 DDL détecté, transaction désactivée.\n";
+            }
+            
+            $runner->rollback($rollbackSql, $useTransaction);
+            $manager->markAsRolledBack($migrationName);
+            echo "✅ Migration {$migrationName} annulée avec succès.\n\n";
+        } catch (\Exception $e) {
+            echo "❌ Erreur lors du rollback de {$migrationName} : {$e->getMessage()}\n";
+            exit(1);
+        }
+    }
+    
+    echo "✅ Rollback terminé.\n";
+}
+
+/**
+ * Charge une classe de migration
+ */
+function loadMigrationClass(string $migrationName): ?object
+{
+    $migrationsPath = getcwd() . '/migrations';
+    $classFile = $migrationsPath . '/' . $migrationName . '.php';
+    
+    if (!file_exists($classFile)) {
+        return null;
+    }
+    
+    require_once $classFile;
+    
+    // Chercher la classe dans le namespace
+    $className = $migrationName;
+    if (class_exists($className)) {
+        return new $className();
+    }
+    
+    // Chercher dans le namespace App\Migrations
+    $className = 'App\\Migrations\\' . $migrationName;
+    if (class_exists($className)) {
+        return new $className();
+    }
+    
+    return null;
+}
+
+/**
+ * Génère un rollback automatique basé sur le nom ou le SQL de la migration
+ */
+function generateAutomaticRollback(string $migrationName, EntityManager $em, ?string $upSql = null): string
+{
+    // Si on a le SQL up, essayer de générer le rollback inverse
+    if ($upSql !== null) {
+        // Détecter CREATE TABLE -> DROP TABLE
+        if (preg_match('/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(\w+)`?/i', $upSql, $matches)) {
+            $tableName = $matches[1];
+            return "DROP TABLE IF EXISTS `{$tableName}`;";
+        }
+        
+        // Détecter ALTER TABLE ADD COLUMN -> ALTER TABLE DROP COLUMN
+        if (preg_match('/ALTER\s+TABLE\s+`?(\w+)`?\s+ADD\s+COLUMN\s+`?(\w+)`?/i', $upSql, $matches)) {
+            $tableName = $matches[1];
+            $columnName = $matches[2];
+            return "ALTER TABLE `{$tableName}` DROP COLUMN `{$columnName}`;";
+        }
+    }
+    
+    // Basé sur le nom de la migration
+    if (preg_match('/Create(\w+)Table/i', $migrationName, $matches)) {
+        $tableName = strtolower($matches[1]);
+        return "DROP TABLE IF EXISTS `{$tableName}`;";
+    }
+    
+    return '';
+}
+
+/**
  * Affiche le statut des migrations
  */
 function showStatus(EntityManager $em): void
@@ -442,12 +633,15 @@ function showHelp(): void
     echo "Commandes disponibles:\n";
     echo "  generate [EntityClass]  Génère une migration pour une entité ou toutes les entités\n";
     echo "  migrate                Exécute les migrations en attente\n";
+    echo "  rollback [--steps=N]   Annule les migrations (dernière par défaut, ou N migrations)\n";
     echo "  status                 Affiche le statut des migrations\n";
     echo "  help                   Affiche cette aide\n\n";
     echo "Exemples:\n";
     echo "  php bin/doctrine-migrate generate\n";
     echo "  php bin/doctrine-migrate generate App\\Entity\\User\n";
     echo "  php bin/doctrine-migrate migrate\n";
+    echo "  php bin/doctrine-migrate rollback\n";
+    echo "  php bin/doctrine-migrate rollback --steps=3\n";
     echo "  php bin/doctrine-migrate status\n\n";
     echo "Configuration:\n";
     echo "  Le script cherche la config dans:\n";
