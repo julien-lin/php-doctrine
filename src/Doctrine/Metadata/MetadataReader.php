@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace JulienLinard\Doctrine\Metadata;
 
 use ReflectionClass;
@@ -7,6 +9,7 @@ use ReflectionProperty;
 use JulienLinard\Doctrine\Mapping\Entity;
 use JulienLinard\Doctrine\Mapping\Id;
 use JulienLinard\Doctrine\Mapping\Column;
+use JulienLinard\Doctrine\Mapping\Index;
 use JulienLinard\Doctrine\Mapping\ManyToOne;
 use JulienLinard\Doctrine\Mapping\OneToMany;
 use JulienLinard\Doctrine\Mapping\ManyToMany;
@@ -39,6 +42,7 @@ class MetadataReader
             'id' => null,
             'columns' => [],
             'relations' => [],
+            'indexes' => [],
         ];
 
         // Lire l'attribut Entity
@@ -64,14 +68,27 @@ class MetadataReader
             $columnAttributes = $property->getAttributes(Column::class);
             if (!empty($columnAttributes)) {
                 $columnAttribute = $columnAttributes[0]->newInstance();
+                $columnName = $columnAttribute->name ?? $propertyName;
                 $metadata['columns'][$propertyName] = [
                     'type' => $columnAttribute->type,
                     'length' => $columnAttribute->length,
                     'nullable' => $columnAttribute->nullable,
                     'default' => $columnAttribute->default,
-                    'name' => $columnAttribute->name ?? $propertyName,
+                    'name' => $columnName,
                     'autoIncrement' => $columnAttribute->autoIncrement,
                 ];
+                
+                // Lire les index
+                $indexAttributes = $property->getAttributes(Index::class);
+                if (!empty($indexAttributes)) {
+                    $indexAttribute = $indexAttributes[0]->newInstance();
+                    $indexName = $indexAttribute->name ?? ('idx_' . $columnName);
+                    $metadata['indexes'][] = [
+                        'column' => $columnName,
+                        'name' => $indexName,
+                        'unique' => $indexAttribute->unique,
+                    ];
+                }
             }
 
             // Lire les relations ManyToOne

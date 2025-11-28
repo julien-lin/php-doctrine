@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace JulienLinard\Doctrine\QueryBuilder;
 
 use JulienLinard\Doctrine\Database\Connection;
@@ -56,6 +58,7 @@ class QueryBuilder
      */
     public function from(string $entityClass, string $alias): self
     {
+        $this->validateIdentifier($alias);
         $tableName = $this->metadataReader->getTableName($entityClass);
         $this->from[] = [
             'entity' => $entityClass,
@@ -89,7 +92,14 @@ class QueryBuilder
      */
     public function andWhere(string $condition, mixed $value = null): self
     {
-        return $this->where($condition, $value);
+        if ($value !== null) {
+            $paramName = 'param_' . count($this->parameters);
+            $this->where[] = 'AND ' . str_replace('?', ':' . $paramName, $condition);
+            $this->parameters[$paramName] = $value;
+        } else {
+            $this->where[] = 'AND ' . $condition;
+        }
+        return $this;
     }
 
     /**
@@ -112,6 +122,8 @@ class QueryBuilder
      */
     public function join(string $entityClass, string $alias, string $condition, string $type = 'INNER'): self
     {
+        $this->validateIdentifier($alias);
+        $this->validateJoinType($type);
         $tableName = $this->metadataReader->getTableName($entityClass);
         $this->join[] = [
             'type' => $type,
@@ -217,11 +229,15 @@ class QueryBuilder
         }
         
         $from = $this->from[0];
-        $sql .= " FROM {$from['table']} AS {$from['alias']}";
+        $tableNameEscaped = $this->escapeIdentifier($from['table']);
+        // Les alias ne doivent pas être échappés avec des backticks dans AS
+        $sql .= " FROM {$tableNameEscaped} AS {$from['alias']}";
         
         // JOIN
         foreach ($this->join as $join) {
-            $sql .= " {$join['type']} JOIN {$join['table']} AS {$join['alias']} ON {$join['condition']}";
+            $joinTableEscaped = $this->escapeIdentifier($join['table']);
+            // Les alias ne doivent pas être échappés avec des backticks dans AS
+            $sql .= " {$join['type']} JOIN {$joinTableEscaped} AS {$join['alias']} ON {$join['condition']}";
         }
         
         // WHERE
@@ -258,6 +274,53 @@ class QueryBuilder
     public function getSql(): string
     {
         return $this->buildSql();
+    }
+    
+    /**
+     * Valide qu'un identifiant SQL est valide
+     * 
+     * @param string $identifier Identifiant à valider
+     * @throws \InvalidArgumentException Si l'identifiant n'est pas valide
+     */
+    private function validateIdentifier(string $identifier): void
+    {
+        // Un identifiant SQL valide commence par une lettre ou underscore
+        // et contient uniquement des lettres, chiffres et underscores
+        if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $identifier)) {
+            throw new \InvalidArgumentException(
+                "Invalid identifier: '{$identifier}'. Identifiers must start with a letter or underscore and contain only letters, numbers, and underscores."
+            );
+        }
+    }
+    
+    /**
+     * Échappe un identifiant SQL avec des backticks
+     * 
+     * @param string $identifier Identifiant à échapper
+     * @return string Identifiant échappé avec backticks
+     */
+    private function escapeIdentifier(string $identifier): string
+    {
+        $this->validateIdentifier($identifier);
+        // Échapper les backticks en les doublant
+        $escaped = str_replace('`', '``', $identifier);
+        return "`{$escaped}`";
+    }
+    
+    /**
+     * Valide le type de JOIN
+     * 
+     * @param string $type Type de JOIN
+     * @throws \InvalidArgumentException Si le type n'est pas valide
+     */
+    private function validateJoinType(string $type): void
+    {
+        $validTypes = ['INNER', 'LEFT', 'RIGHT', 'FULL', 'CROSS'];
+        if (!in_array(strtoupper($type), $validTypes, true)) {
+            throw new \InvalidArgumentException(
+                "Invalid join type: '{$type}'. Valid types are: " . implode(', ', $validTypes)
+            );
+        }
     }
 }
 
