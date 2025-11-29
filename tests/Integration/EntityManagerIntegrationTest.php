@@ -198,6 +198,184 @@ class EntityManagerIntegrationTest extends TestCase
         $this->assertEquals('User 3', $users[0]->name);
     }
     
+    /**
+     * Test avec méthode transaction() - succès
+     */
+    public function testTransactionMethodSuccess(): void
+    {
+        $result = $this->em->transaction(function($em) {
+            $user1 = new TestUser();
+            $user1->email = 'tx1@example.com';
+            $user1->name = 'Transaction User 1';
+            $em->persist($user1);
+            
+            $user2 = new TestUser();
+            $user2->email = 'tx2@example.com';
+            $user2->name = 'Transaction User 2';
+            $em->persist($user2);
+            
+            $em->flush();
+            
+            return [$user1, $user2];
+        });
+        
+        // Vérifier que les entités ont été persistées (commit effectué)
+        $this->assertCount(2, $result);
+        $this->assertNotNull($result[0]->id);
+        $this->assertNotNull($result[1]->id);
+        
+        $allUsers = $this->em->getRepository(TestUser::class)->findAll();
+        $this->assertCount(2, $allUsers);
+    }
+    
+    /**
+     * Test avec méthode transaction() - rollback automatique
+     */
+    public function testTransactionMethodRollback(): void
+    {
+        try {
+            $this->em->transaction(function($em) {
+                $user = new TestUser();
+                $user->email = 'rollback@example.com';
+                $user->name = 'Rollback User';
+                $em->persist($user);
+                $em->flush();
+                
+                throw new \RuntimeException('Test error');
+            });
+            
+            $this->fail('Une exception aurait dû être levée');
+        } catch (\RuntimeException $e) {
+            $this->assertEquals('Test error', $e->getMessage());
+        }
+        
+        // Vérifier que rien n'a été persisté (rollback effectué)
+        $users = $this->em->getRepository(TestUser::class)->findAll();
+        $this->assertCount(0, $users);
+    }
+    
+    /**
+     * Test avec findOrFail
+     */
+    public function testFindOrFailIntegration(): void
+    {
+        $user = new TestUser();
+        $user->email = 'findorfail@example.com';
+        $user->name = 'FindOrFail User';
+        $this->em->persist($user);
+        $this->em->flush();
+        
+        $repository = $this->em->getRepository(TestUser::class);
+        
+        // Trouver avec findOrFail
+        $found = $repository->findOrFail($user->id);
+        $this->assertEquals('findorfail@example.com', $found->email);
+        
+        // Vérifier que findOrFail lève une exception si non trouvé
+        $this->expectException(\JulienLinard\Doctrine\Exceptions\EntityNotFoundException::class);
+        $repository->findOrFail(999);
+    }
+    
+    /**
+     * Test avec findOneByOrFail
+     */
+    public function testFindOneByOrFailIntegration(): void
+    {
+        $user = new TestUser();
+        $user->email = 'findonebyorfail@example.com';
+        $user->name = 'FindOneByOrFail User';
+        $this->em->persist($user);
+        $this->em->flush();
+        
+        $repository = $this->em->getRepository(TestUser::class);
+        
+        // Trouver avec findOneByOrFail
+        $found = $repository->findOneByOrFail(['email' => 'findonebyorfail@example.com']);
+        $this->assertEquals('FindOneByOrFail User', $found->name);
+        
+        // Vérifier que findOneByOrFail lève une exception si non trouvé
+        $this->expectException(\JulienLinard\Doctrine\Exceptions\DoctrineException::class);
+        $repository->findOneByOrFail(['email' => 'notfound@example.com']);
+    }
+    
+    /**
+     * Test avec batch operations
+     */
+    public function testBatchOperationsIntegration(): void
+    {
+        $users = [];
+        for ($i = 1; $i <= 5; $i++) {
+            $user = new TestUser();
+            $user->email = "batch{$i}@example.com";
+            $user->name = "Batch User {$i}";
+            $users[] = $user;
+        }
+        
+        // Utiliser persistBatch
+        $this->em->persistBatch($users);
+        $this->em->flush();
+        
+        // Vérifier que tous ont été créés
+        $allUsers = $this->em->getRepository(TestUser::class)->findAll();
+        $this->assertGreaterThanOrEqual(5, count($allUsers));
+        
+        // Vérifier les IDs
+        foreach ($users as $user) {
+            $this->assertNotNull($user->id);
+        }
+    }
+    
+    /**
+     * Test avec query cache
+     */
+    public function testQueryCacheIntegration(): void
+    {
+        $user = new TestUser();
+        $user->email = 'cache@example.com';
+        $user->name = 'Cache User';
+        $this->em->persist($user);
+        $this->em->flush();
+        
+        $repository = $this->em->getRepository(TestUser::class);
+        
+        // Premier appel sans cache
+        $users1 = $repository->findAll(false);
+        $this->assertCount(1, $users1);
+        
+        // Deuxième appel avec cache
+        $users2 = $repository->findAll(true);
+        $this->assertCount(1, $users2);
+        $this->assertEquals($users1[0]->email, $users2[0]->email);
+    }
+    
+    /**
+     * Test avec query logging
+     */
+    public function testQueryLoggingIntegration(): void
+    {
+        $logger = $this->em->enableQueryLog(true);
+        
+        $user = new TestUser();
+        $user->email = 'logging@example.com';
+        $user->name = 'Logging User';
+        $this->em->persist($user);
+        $this->em->flush();
+        
+        // Vérifier que les requêtes ont été loggées
+        $logs = $logger->getLogs();
+        $this->assertGreaterThan(0, count($logs));
+        
+        // Vérifier qu'il y a au moins une requête INSERT
+        $hasInsert = false;
+        foreach ($logs as $log) {
+            if (stripos($log['sql'], 'INSERT') !== false) {
+                $hasInsert = true;
+                break;
+            }
+        }
+        $this->assertTrue($hasInsert);
+    }
+    
     private function createTestTable(): void
     {
         $this->em->getConnection()->execute(

@@ -155,6 +155,135 @@ class RepositoryIntegrationTest extends TestCase
         $this->assertLessThan(1.0, $end - $start); // Doit être rapide (< 1 seconde)
     }
     
+    /**
+     * Test avec findAllWith et relations (eager loading optimisé)
+     */
+    public function testFindAllWithRelations(): void
+    {
+        // Créer des utilisateurs avec posts
+        $this->createUsersWithPosts();
+        
+        $repository = $this->em->getRepository(\JulienLinard\Doctrine\Tests\Fixtures\TestUserWithRelations::class);
+        
+        // Charger tous les utilisateurs avec leurs posts (eager loading)
+        $users = $repository->findAllWith(['posts']);
+        
+        $this->assertGreaterThanOrEqual(3, count($users));
+        
+        // Vérifier que chaque utilisateur a ses posts chargés
+        foreach ($users as $user) {
+            $this->assertIsArray($user->posts);
+            $this->assertGreaterThanOrEqual(2, count($user->posts));
+        }
+    }
+    
+    /**
+     * Test avec query cache dans findBy
+     */
+    public function testFindByWithCache(): void
+    {
+        $repository = $this->em->getRepository(TestProduct::class);
+        
+        // Premier appel sans cache
+        $products1 = $repository->findBy(['price' => 30.0], null, null, null, false);
+        $this->assertCount(1, $products1);
+        
+        // Deuxième appel avec cache
+        $products2 = $repository->findBy(['price' => 30.0], null, null, null, true);
+        $this->assertCount(1, $products2);
+        $this->assertEquals($products1[0]->name, $products2[0]->name);
+    }
+    
+    /**
+     * Test avec findOrFail dans un scénario réel
+     */
+    public function testFindOrFailRealScenario(): void
+    {
+        $repository = $this->em->getRepository(TestProduct::class);
+        
+        // Trouver un produit existant
+        $product = $repository->findOrFail(1);
+        $this->assertNotNull($product);
+        $this->assertEquals('Product A', $product->name);
+    }
+    
+    /**
+     * Test avec findOneByOrFail dans un scénario réel
+     */
+    public function testFindOneByOrFailRealScenario(): void
+    {
+        $repository = $this->em->getRepository(TestProduct::class);
+        
+        // Trouver un produit existant
+        $product = $repository->findOneByOrFail(['name' => 'Product C', 'price' => 30.0]);
+        $this->assertNotNull($product);
+        $this->assertEquals('Product C', $product->name);
+    }
+    
+    /**
+     * Test de scénario complet : recherche, tri, pagination, cache
+     */
+    public function testCompleteRepositoryScenario(): void
+    {
+        $repository = $this->em->getRepository(TestProduct::class);
+        
+        // Scénario : rechercher des produits, trier, paginer, utiliser le cache
+        $products = $repository->findBy(
+            [], // Pas de critères
+            ['name' => 'ASC'], // Trier par nom
+            3, // Limite de 3
+            0, // Offset 0
+            true, // Utiliser le cache
+            3600 // TTL 1 heure
+        );
+        
+        $this->assertCount(3, $products);
+        $this->assertEquals('Product A', $products[0]->name);
+        $this->assertEquals('Product B', $products[1]->name);
+        $this->assertEquals('Product C', $products[2]->name);
+    }
+    
+    /**
+     * Crée des utilisateurs avec posts pour tester les relations
+     */
+    private function createUsersWithPosts(): void
+    {
+        // Créer les tables nécessaires
+        $this->em->getConnection()->execute(
+            "CREATE TABLE IF NOT EXISTS test_users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email VARCHAR(255) NOT NULL,
+                name VARCHAR(255) NOT NULL
+            )"
+        );
+        
+        $this->em->getConnection()->execute(
+            "CREATE TABLE IF NOT EXISTS test_posts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                title VARCHAR(255) NOT NULL,
+                content TEXT
+            )"
+        );
+        
+        // Créer des utilisateurs avec posts
+        for ($i = 1; $i <= 3; $i++) {
+            $user = new \JulienLinard\Doctrine\Tests\Fixtures\TestUserWithRelations();
+            $user->email = "user{$i}@example.com";
+            $user->name = "User {$i}";
+            $this->em->persist($user);
+            $this->em->flush();
+            
+            // Créer 2 posts pour chaque utilisateur
+            for ($j = 1; $j <= 2; $j++) {
+                $this->em->getConnection()->execute(
+                    "INSERT INTO test_posts (user_id, title, content) VALUES (?, ?, ?)",
+                    [$user->id, "Post {$j} for User {$i}", "Content"]
+                );
+            }
+        }
+    }
+    
     private function createTestTable(): void
     {
         $this->em->getConnection()->execute(
