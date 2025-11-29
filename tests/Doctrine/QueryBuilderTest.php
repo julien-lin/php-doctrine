@@ -6,9 +6,8 @@ namespace JulienLinard\Doctrine\Tests;
 
 use PHPUnit\Framework\TestCase;
 use JulienLinard\Doctrine\EntityManager;
-use JulienLinard\Doctrine\Mapping\Entity;
-use JulienLinard\Doctrine\Mapping\Column;
-use JulienLinard\Doctrine\Mapping\Id;
+use JulienLinard\Doctrine\Tests\Fixtures\TestUserEntity;
+use JulienLinard\Doctrine\Tests\Fixtures\TestPostEntity;
 
 /**
  * Tests pour QueryBuilder
@@ -305,22 +304,5 @@ class QueryBuilderTest extends TestCase
             ['user_id' => 1, 'title' => 'Post 1', 'content' => 'Content 1']
         );
     }
-}
-
-#[Entity(table: 'test_posts')]
-class TestPostEntity
-{
-    #[Id]
-    #[Column(type: 'integer', autoIncrement: true)]
-    public ?int $id = null;
-    
-    #[Column(type: 'integer')]
-    public int $userId;
-    
-    #[Column(type: 'string', length: 255)]
-    public string $title;
-    
-    #[Column(type: 'string', nullable: true)]
-    public ?string $content = null;
 }
 

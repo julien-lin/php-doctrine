@@ -6,9 +6,7 @@ namespace JulienLinard\Doctrine\Tests\Performance;
 
 use PHPUnit\Framework\TestCase;
 use JulienLinard\Doctrine\EntityManager;
-use JulienLinard\Doctrine\Mapping\Entity;
-use JulienLinard\Doctrine\Mapping\Column;
-use JulienLinard\Doctrine\Mapping\Id;
+use JulienLinard\Doctrine\Tests\Fixtures\TestUser;
 
 /**
  * Tests de performance (benchmarks)
@@ -204,19 +202,5 @@ class BenchmarkTest extends TestCase
             )"
         );
     }
-}
-
-#[Entity(table: 'test_users')]
-class TestUser
-{
-    #[Id]
-    #[Column(type: 'integer', autoIncrement: true)]
-    public ?int $id = null;
-    
-    #[Column(type: 'string', length: 255)]
-    public string $email;
-    
-    #[Column(type: 'string', length: 255)]
-    public string $name;
 }
 

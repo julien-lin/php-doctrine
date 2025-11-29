@@ -7,10 +7,8 @@ namespace JulienLinard\Doctrine\Tests;
 use PHPUnit\Framework\TestCase;
 use JulienLinard\Doctrine\EntityManager;
 use JulienLinard\Doctrine\Validation\ValidationException;
-use JulienLinard\Doctrine\Validation\Assert;
-use JulienLinard\Doctrine\Mapping\Entity;
-use JulienLinard\Doctrine\Mapping\Column;
-use JulienLinard\Doctrine\Mapping\Id;
+use JulienLinard\Doctrine\Tests\Fixtures\TestUserWithValidation;
+use JulienLinard\Doctrine\Tests\Fixtures\TestProduct;
 
 /**
  * Tests pour le système de validation
@@ -37,7 +35,7 @@ class ValidationTest extends TestCase
      */
     public function testNotBlankValidation(): void
     {
-        $user = new TestUser();
+        $user = new TestUserWithValidation();
         $user->email = ''; // Vide
         $user->name = 'Test';
         
@@ -50,7 +48,7 @@ class ValidationTest extends TestCase
      */
     public function testEmailValidation(): void
     {
-        $user = new TestUser();
+        $user = new TestUserWithValidation();
         $user->email = 'invalid-email'; // Email invalide
         $user->name = 'Test';
         
@@ -63,7 +61,7 @@ class ValidationTest extends TestCase
      */
     public function testValidEmail(): void
     {
-        $user = new TestUser();
+        $user = new TestUserWithValidation();
         $user->email = 'test@example.com';
         $user->name = 'Test';
         
@@ -79,7 +77,7 @@ class ValidationTest extends TestCase
      */
     public function testLengthValidation(): void
     {
-        $user = new TestUser();
+        $user = new TestUserWithValidation();
         $user->email = 'test@example.com';
         $user->name = 'AB'; // Trop court (min: 3)
         
@@ -107,7 +105,7 @@ class ValidationTest extends TestCase
     {
         $this->em->setValidationEnabled(false);
         
-        $user = new TestUser();
+        $user = new TestUserWithValidation();
         $user->email = ''; // Vide, mais validation désactivée
         $user->name = 'Test';
         
@@ -136,39 +134,5 @@ class ValidationTest extends TestCase
             )"
         );
     }
-}
-
-#[Entity(table: 'test_users')]
-class TestUser
-{
-    #[Id]
-    #[Column(type: 'integer', autoIncrement: true)]
-    public ?int $id = null;
-    
-    #[Column(type: 'string', length: 255)]
-    #[Assert(type: 'NotBlank')]
-    #[Assert(type: 'Email')]
-    public string $email;
-    
-    #[Column(type: 'string', length: 255)]
-    #[Assert(type: 'NotBlank')]
-    #[Assert(type: 'Length', options: ['min' => 3, 'max' => 255])]
-    public string $name;
-}
-
-#[Entity(table: 'test_products')]
-class TestProduct
-{
-    #[Id]
-    #[Column(type: 'integer', autoIncrement: true)]
-    public ?int $id = null;
-    
-    #[Column(type: 'string', length: 255)]
-    #[Assert(type: 'NotBlank')]
-    public string $name;
-    
-    #[Column(type: 'decimal')]
-    #[Assert(type: 'Range', options: ['min' => 0, 'max' => 10000])]
-    public float $price;
 }
 

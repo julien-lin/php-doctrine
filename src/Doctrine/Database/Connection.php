@@ -117,14 +117,55 @@ class Connection
      * Exécute une requête SQL
      *
      * @param string $sql Requête SQL
-     * @param array $params Paramètres
+     * @param array $params Paramètres (clés sans les deux-points, ex: 'param_0' pour ':param_0')
      * @return \PDOStatement Statement exécuté
      */
     public function execute(string $sql, array $params = []): \PDOStatement
     {
         $pdo = $this->getPdo();
         $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
+        
+        // PDO accepte les paramètres nommés avec les clés sans ':' 
+        // (ex: ['param_0' => value] pour ':param_0' dans le SQL)
+        // Utiliser bindValue pour chaque paramètre pour une meilleure compatibilité avec SQLite
+        if (!empty($params)) {
+            // Vérifier si on utilise des paramètres nommés (clés string) ou positionnels (clés numériques)
+            $hasNamedParams = false;
+            foreach ($params as $key => $value) {
+                if (!is_int($key)) {
+                    $hasNamedParams = true;
+                    break;
+                }
+            }
+            
+            if ($hasNamedParams) {
+                // Paramètres nommés (ex: ['param' => value] pour ':param')
+                foreach ($params as $key => $value) {
+                    $placeholder = ':' . $key;
+                    $type = match (true) {
+                        is_int($value) => PDO::PARAM_INT,
+                        is_bool($value) => PDO::PARAM_BOOL,
+                        is_null($value) => PDO::PARAM_NULL,
+                        default => PDO::PARAM_STR,
+                    };
+                    $stmt->bindValue($placeholder, $value, $type);
+                }
+            } else {
+                // Paramètres positionnels (ex: [value1, value2] pour '?')
+                foreach ($params as $index => $value) {
+                    $type = match (true) {
+                        is_int($value) => PDO::PARAM_INT,
+                        is_bool($value) => PDO::PARAM_BOOL,
+                        is_null($value) => PDO::PARAM_NULL,
+                        default => PDO::PARAM_STR,
+                    };
+                    $stmt->bindValue($index + 1, $value, $type);
+                }
+            }
+            $stmt->execute();
+        } else {
+            $stmt->execute();
+        }
         return $stmt;
     }
 
@@ -138,7 +179,7 @@ class Connection
     public function fetchAll(string $sql, array $params = []): array
     {
         $stmt = $this->execute($sql, $params);
-        return $stmt->fetchAll();
+        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
     /**
@@ -151,7 +192,7 @@ class Connection
     public function fetchOne(string $sql, array $params = []): ?array
     {
         $stmt = $this->execute($sql, $params);
-        $result = $stmt->fetch();
+        $result = $stmt->fetch(\PDO::FETCH_ASSOC);
         return $result ?: null;
     }
 

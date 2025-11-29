@@ -7,9 +7,7 @@ namespace JulienLinard\Doctrine\Tests;
 use PHPUnit\Framework\TestCase;
 use JulienLinard\Doctrine\EntityManager;
 use JulienLinard\Doctrine\Repository\EntityRepository;
-use JulienLinard\Doctrine\Mapping\Entity;
-use JulienLinard\Doctrine\Mapping\Column;
-use JulienLinard\Doctrine\Mapping\Id;
+use JulienLinard\Doctrine\Tests\Fixtures\TestUserEntity;
 
 /**
  * Tests pour EntityRepository
@@ -220,25 +218,5 @@ class EntityRepositoryTest extends TestCase
             ['email' => 'test3@example.com', 'name' => 'User 3']
         );
     }
-}
-
-#[Entity(table: 'test_users')]
-class TestUserEntity
-{
-    #[Id]
-    #[Column(type: 'integer', autoIncrement: true)]
-    public ?int $id = null;
-    
-    #[Column(type: 'string', length: 255)]
-    public string $email;
-    
-    #[Column(type: 'string', length: 255)]
-    public string $name;
-    
-    #[Column(type: 'datetime', nullable: true)]
-    public ?\DateTime $createdAt = null;
-    
-    #[Column(type: 'boolean', default: true)]
-    public bool $isActive = true;
 }
 

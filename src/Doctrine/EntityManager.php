@@ -9,6 +9,7 @@ use JulienLinard\Doctrine\Metadata\MetadataReader;
 use JulienLinard\Doctrine\Repository\EntityRepository;
 use JulienLinard\Doctrine\Repository\RepositoryInterface;
 use JulienLinard\Doctrine\Validation\Validator;
+use JulienLinard\Doctrine\Cache\QueryCache;
 
 /**
  * Entity Manager - Gestionnaire principal des entités
@@ -49,16 +50,28 @@ class EntityManager
      * Active ou désactive la validation automatique
      */
     private bool $validationEnabled = true;
+    
+    /**
+     * Cache des requêtes
+     */
+    private ?QueryCache $queryCache = null;
+    
+    /**
+     * Entités en attente de persistance par batch
+     */
+    private array $batchToPersist = [];
 
     /**
      * Constructeur
      *
      * @param array $config Configuration de la base de données
+     * @param QueryCache|null $queryCache Cache de requêtes (optionnel)
      */
-    public function __construct(array $config)
+    public function __construct(array $config, ?QueryCache $queryCache = null)
     {
         $this->connection = new Connection($config);
         $this->metadataReader = new MetadataReader();
+        $this->queryCache = $queryCache ?? new QueryCache();
     }
 
     /**
@@ -144,6 +157,39 @@ class EntityManager
     {
         // Gérer les cascades persist avant de persister les entités principales
         $this->processCascadePersist();
+        
+        // Traiter d'abord les batch operations (plus efficace)
+        if (!empty($this->batchToPersist)) {
+            foreach ($this->batchToPersist as $className => $entities) {
+                // Vérifier que toutes les entités sont nouvelles (pas d'ID)
+                $allNew = true;
+                foreach ($entities as $entity) {
+                    $metadata = $this->metadataReader->getMetadata($className);
+                    if ($metadata['id'] !== null) {
+                        $reflection = $this->getReflectionClass($entity);
+                        $idProperty = $reflection->getProperty($metadata['id']);
+                        $idProperty->setAccessible(true);
+                        $id = $idProperty->getValue($entity);
+                        
+                        if ($id !== null && $id !== 0) {
+                            $allNew = false;
+                            break;
+                        }
+                    }
+                }
+                
+                if ($allNew && count($entities) > 1) {
+                    // Utiliser batch insert pour plusieurs nouvelles entités
+                    $this->insertBatch($entities);
+                } else {
+                    // Persister individuellement
+                    foreach ($entities as $entity) {
+                        $this->persistEntity($entity);
+                    }
+                }
+            }
+            $this->batchToPersist = [];
+        }
         
         // Trier les entités à persister : d'abord celles sans relations ManyToOne, puis les autres
         $entitiesToPersist = $this->toPersist;
@@ -275,6 +321,23 @@ class EntityManager
                 if (is_array($value)) {
                     foreach ($value as $relatedEntity) {
                         if (is_object($relatedEntity)) {
+                            // Pour OneToMany, définir la relation inverse (ManyToOne) si elle existe
+                            if ($relation['type'] === 'OneToMany') {
+                                $relatedMetadata = $this->metadataReader->getMetadata($relation['targetEntity']);
+                                $relatedReflection = $this->getReflectionClass($relatedEntity);
+                                
+                                // Chercher la relation ManyToOne inverse
+                                foreach ($relatedMetadata['relations'] ?? [] as $relatedPropName => $relatedRel) {
+                                    if ($relatedRel['type'] === 'ManyToOne' && 
+                                        $relatedRel['targetEntity'] === $className) {
+                                        $relatedProp = $relatedReflection->getProperty($relatedPropName);
+                                        $relatedProp->setAccessible(true);
+                                        $relatedProp->setValue($relatedEntity, $entity);
+                                        break;
+                                    }
+                                }
+                            }
+                            
                             $this->toPersist[] = $relatedEntity;
                             $this->processCascadePersistForEntity($relatedEntity, $processed);
                         }
@@ -455,6 +518,11 @@ class EntityManager
         $sql = "INSERT INTO {$tableName} (" . implode(', ', $columns) . ") VALUES (" . implode(', ', $values) . ")";
         $this->connection->execute($sql, $params);
         
+        // Invalider le cache pour cette entité
+        if ($this->queryCache !== null) {
+            $this->queryCache->invalidateEntity($className);
+        }
+        
         // Récupérer l'ID généré
         if ($metadata['id'] !== null) {
             $idColumn = $metadata['columns'][$metadata['id']]['name'] ?? $metadata['id'];
@@ -463,6 +531,189 @@ class EntityManager
                 $idProperty = $reflection->getProperty($metadata['id']);
                 $idProperty->setAccessible(true);
                 $idProperty->setValue($entity, (int)$lastId);
+            }
+        }
+    }
+    
+    /**
+     * Insère plusieurs entités en une seule requête INSERT avec VALUES multiples
+     * 
+     * @param array $entities Tableau d'entités de la même classe
+     * @return void
+     */
+    private function insertBatch(array $entities): void
+    {
+        if (empty($entities)) {
+            return;
+        }
+        
+        $firstEntity = $entities[0];
+        $className = get_class($firstEntity);
+        $metadata = $this->metadataReader->getMetadata($className);
+        $tableName = $this->escapeIdentifier($metadata['table']);
+        
+        $reflection = $this->getReflectionClass($firstEntity);
+        
+        // Déterminer toutes les colonnes possibles (colonnes + relations ManyToOne)
+        $columns = [];
+        $columnMap = []; // Map propertyName => columnIndex
+        $hasId = $metadata['id'] !== null;
+        $idPropertyName = $metadata['id'];
+        $columnIndex = 0;
+        
+        // Ajouter les colonnes normales
+        foreach ($metadata['columns'] as $propertyName => $columnInfo) {
+            // Ignorer les IDs auto-incrémentés
+            if ($propertyName === $idPropertyName && $columnInfo['autoIncrement']) {
+                continue;
+            }
+            
+            $columnName = $columnInfo['name'];
+            $columnEscaped = $this->escapeIdentifier($columnName);
+            $columns[] = $columnEscaped;
+            $columnMap[$propertyName] = $columnIndex++;
+        }
+        
+        // Ajouter les colonnes de relations ManyToOne
+        foreach ($metadata['relations'] ?? [] as $propertyName => $relation) {
+            if ($relation['type'] === 'ManyToOne') {
+                $joinColumn = $relation['joinColumn'];
+                $joinColumnEscaped = $this->escapeIdentifier($joinColumn);
+                
+                // Vérifier si la colonne n'existe pas déjà
+                if (!in_array($joinColumnEscaped, $columns)) {
+                    $columns[] = $joinColumnEscaped;
+                    $columnMap['_relation_' . $propertyName] = $columnIndex++;
+                }
+            }
+        }
+        
+        // Construire la requête INSERT avec VALUES multiples
+        $valuesParts = [];
+        $allParams = [];
+        $paramCounter = 0;
+        
+        foreach ($entities as $entityIndex => $entity) {
+            $valueParts = array_fill(0, count($columns), 'NULL');
+            
+            // Remplir les valeurs des colonnes normales
+            foreach ($metadata['columns'] as $propertyName => $columnInfo) {
+                // Ignorer les IDs auto-incrémentés
+                if ($propertyName === $idPropertyName && $columnInfo['autoIncrement']) {
+                    continue;
+                }
+                
+                if (!isset($columnMap[$propertyName])) {
+                    continue;
+                }
+                
+                $columnIndex = $columnMap[$propertyName];
+                $property = $reflection->getProperty($propertyName);
+                $property->setAccessible(true);
+                $value = $property->getValue($entity);
+                
+                // Convertir la valeur pour la base de données
+                $dbValue = $this->convertToDatabaseValue($value, $columnInfo['type']);
+                
+                if ($dbValue === null) {
+                    $valueParts[$columnIndex] = 'NULL';
+                } else {
+                    $paramName = 'batch_' . $entityIndex . '_' . $paramCounter++;
+                    $valueParts[$columnIndex] = ":{$paramName}";
+                    $allParams[$paramName] = $dbValue;
+                }
+            }
+            
+            // Remplir les valeurs des relations ManyToOne
+            foreach ($metadata['relations'] ?? [] as $propertyName => $relation) {
+                if ($relation['type'] !== 'ManyToOne') {
+                    continue;
+                }
+                
+                $mapKey = '_relation_' . $propertyName;
+                if (!isset($columnMap[$mapKey])) {
+                    continue;
+                }
+                
+                $columnIndex = $columnMap[$mapKey];
+                $property = $reflection->getProperty($propertyName);
+                $property->setAccessible(true);
+                $relatedEntity = $property->getValue($entity);
+                
+                if ($relatedEntity !== null && is_object($relatedEntity)) {
+                    $relatedMetadata = $this->metadataReader->getMetadata($relation['targetEntity']);
+                    $relatedReflection = $this->getReflectionClass($relatedEntity);
+                    $relatedIdProperty = $relatedReflection->getProperty($relatedMetadata['id']);
+                    $relatedIdProperty->setAccessible(true);
+                    $relatedId = $relatedIdProperty->getValue($relatedEntity);
+                    
+                    // Si l'entité liée n'a pas d'ID, la persister d'abord
+                    if ($relatedId === null || $relatedId === 0) {
+                        $this->insertEntity($relatedEntity);
+                        $relatedId = $relatedIdProperty->getValue($relatedEntity);
+                    }
+                    
+                    if ($relatedId !== null) {
+                        $paramName = 'batch_' . $entityIndex . '_join_' . $paramCounter++;
+                        $valueParts[$columnIndex] = ":{$paramName}";
+                        $allParams[$paramName] = $relatedId;
+                    }
+                }
+            }
+            
+            $valuesParts[] = '(' . implode(', ', $valueParts) . ')';
+        }
+        
+        // Construire la requête SQL finale
+        $sql = "INSERT INTO {$tableName} (" . implode(', ', $columns) . ") VALUES " . implode(', ', $valuesParts);
+        
+        // Exécuter la requête
+        $this->connection->execute($sql, $allParams);
+        
+        // Invalider le cache pour cette classe d'entité
+        if ($this->queryCache !== null) {
+            $this->queryCache->invalidateEntity($className);
+        }
+        
+        // Récupérer les IDs générés (si auto-increment)
+        if ($hasId) {
+            $idColumn = $metadata['columns'][$idPropertyName]['name'] ?? $idPropertyName;
+            $firstId = $this->connection->lastInsertId();
+            
+            if ($firstId) {
+                // Pour SQLite, lastInsertId() retourne le dernier ID inséré
+                // Pour MySQL, on peut calculer les IDs suivants
+                $driver = $this->connection->getPdo()->getAttribute(\PDO::ATTR_DRIVER_NAME);
+                
+                if ($driver === 'sqlite') {
+                    // SQLite : lastInsertId() retourne le dernier ID, on doit calculer les précédents
+                    $lastId = (int)$firstId;
+                    $count = count($entities);
+                    
+                    for ($i = $count - 1; $i >= 0; $i--) {
+                        $id = $lastId - ($count - 1 - $i);
+                        $idProperty = $reflection->getProperty($idPropertyName);
+                        $idProperty->setAccessible(true);
+                        $idProperty->setValue($entities[$i], $id);
+                        
+                        // Enregistrer l'état original pour le dirty checking
+                        $this->registerOriginalState($entities[$i]);
+                    }
+                } else {
+                    // MySQL : lastInsertId() retourne le premier ID de la séquence
+                    $firstIdInt = (int)$firstId;
+                    $count = count($entities);
+                    
+                    for ($i = 0; $i < $count; $i++) {
+                        $id = $firstIdInt + $i;
+                        $idProperty = $reflection->getProperty($idPropertyName);
+                        $idProperty->setAccessible(true);
+                        $idProperty->setValue($entities[$i], $id);
+                        
+                        // Enregistrer l'état original pour le dirty checking
+                        $this->registerOriginalState($entities[$i]);
+                    }
+                }
             }
         }
     }
@@ -540,6 +791,11 @@ class EntityManager
         
         $sql = "UPDATE {$tableName} SET " . implode(', ', $sets) . " WHERE {$idColumnEscaped} = :id";
         $this->connection->execute($sql, $params);
+        
+        // Invalider le cache pour cette entité
+        if ($this->queryCache !== null) {
+            $this->queryCache->invalidateEntity($className, $idValue);
+        }
         
         // Mettre à jour l'état original après la mise à jour
         $this->originalStates[$entityHash] = $currentState;
@@ -649,6 +905,11 @@ class EntityManager
         $idColumn = $this->escapeIdentifier($metadata['columns'][$idProperty]['name'] ?? $idProperty);
         $sql = "DELETE FROM {$tableName} WHERE {$idColumn} = :id";
         $this->connection->execute($sql, ['id' => $id]);
+        
+        // Invalider le cache pour cette entité
+        if ($this->queryCache !== null) {
+            $this->queryCache->invalidateEntity($className, $id);
+        }
     }
 
     /**
@@ -707,11 +968,14 @@ class EntityManager
     public function getRepository(string $entityClass): RepositoryInterface
     {
         if (!isset($this->repositories[$entityClass])) {
-            $this->repositories[$entityClass] = new EntityRepository(
+            $repository = new EntityRepository(
                 $this->connection,
                 $this->metadataReader,
-                $entityClass
+                $entityClass,
+                $this->queryCache
             );
+            
+            $this->repositories[$entityClass] = $repository;
         }
         
         return $this->repositories[$entityClass];
@@ -940,6 +1204,84 @@ class EntityManager
     public function getMigrationRunner(): \JulienLinard\Doctrine\Migration\MigrationRunner
     {
         return new \JulienLinard\Doctrine\Migration\MigrationRunner($this->connection);
+    }
+    
+    /**
+     * Marque plusieurs entités pour persistance en batch
+     * Les entités seront insérées en une seule requête INSERT avec VALUES multiples
+     * 
+     * @param array $entities Tableau d'entités à persister
+     * @return void
+     * @throws \InvalidArgumentException Si le tableau est vide ou contient des éléments non-object
+     */
+    public function persistBatch(array $entities): void
+    {
+        if (empty($entities)) {
+            throw new \InvalidArgumentException("Le tableau d'entités ne peut pas être vide.");
+        }
+        
+        // Vérifier que tous les éléments sont des objets
+        foreach ($entities as $entity) {
+            if (!is_object($entity)) {
+                throw new \InvalidArgumentException("Toutes les entités doivent être des objets.");
+            }
+        }
+        
+        // Valider les entités si la validation est activée
+        if ($this->validationEnabled) {
+            foreach ($entities as $entity) {
+                $this->validate($entity);
+            }
+        }
+        
+        // Grouper les entités par classe
+        $entitiesByClass = [];
+        foreach ($entities as $entity) {
+            $className = get_class($entity);
+            if (!isset($entitiesByClass[$className])) {
+                $entitiesByClass[$className] = [];
+            }
+            $entitiesByClass[$className][] = $entity;
+        }
+        
+        // Stocker les entités batch par classe
+        foreach ($entitiesByClass as $className => $classEntities) {
+            if (!isset($this->batchToPersist[$className])) {
+                $this->batchToPersist[$className] = [];
+            }
+            $this->batchToPersist[$className] = array_merge(
+                $this->batchToPersist[$className],
+                $classEntities
+            );
+        }
+    }
+    
+    /**
+     * Retourne le cache de requêtes
+     * 
+     * @return QueryCache|null Cache de requêtes
+     */
+    public function getQueryCache(): ?QueryCache
+    {
+        return $this->queryCache;
+    }
+    
+    /**
+     * Définit le cache de requêtes
+     * 
+     * @param QueryCache|null $queryCache Cache de requêtes
+     * @return void
+     */
+    public function setQueryCache(?QueryCache $queryCache): void
+    {
+        $this->queryCache = $queryCache;
+        
+        // Mettre à jour les repositories existants
+        foreach ($this->repositories as $repository) {
+            if ($repository instanceof EntityRepository) {
+                $repository->setQueryCache($queryCache);
+            }
+        }
     }
 }
 
