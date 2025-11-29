@@ -6,6 +6,7 @@ namespace JulienLinard\Doctrine\Database;
 
 use PDO;
 use PDOException;
+use JulienLinard\Doctrine\Database\QueryLoggerInterface;
 
 /**
  * Gestionnaire de connexion à la base de données
@@ -15,6 +16,7 @@ class Connection
     private ?PDO $pdo = null;
     private array $config;
     private bool $inTransaction = false;
+    private ?QueryLoggerInterface $queryLogger = null;
 
     /**
      * Constructeur
@@ -122,6 +124,7 @@ class Connection
      */
     public function execute(string $sql, array $params = []): \PDOStatement
     {
+        $startTime = microtime(true);
         $pdo = $this->getPdo();
         $stmt = $pdo->prepare($sql);
         
@@ -166,6 +169,13 @@ class Connection
         } else {
             $stmt->execute();
         }
+        
+        // Logger la requête si un logger est configuré
+        if ($this->queryLogger !== null && $this->queryLogger->isEnabled()) {
+            $executionTime = microtime(true) - $startTime;
+            $this->queryLogger->log($sql, $params, $executionTime);
+        }
+        
         return $stmt;
     }
 
@@ -284,6 +294,27 @@ class Connection
     public function close(): void
     {
         $this->pdo = null;
+    }
+
+    /**
+     * Définit le logger de requêtes
+     * 
+     * @param QueryLoggerInterface|null $logger Logger de requêtes
+     * @return void
+     */
+    public function setQueryLogger(?QueryLoggerInterface $logger): void
+    {
+        $this->queryLogger = $logger;
+    }
+
+    /**
+     * Retourne le logger de requêtes
+     * 
+     * @return QueryLoggerInterface|null
+     */
+    public function getQueryLogger(): ?QueryLoggerInterface
+    {
+        return $this->queryLogger;
     }
 }
 

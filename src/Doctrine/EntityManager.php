@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace JulienLinard\Doctrine;
 
 use JulienLinard\Doctrine\Database\Connection;
+use JulienLinard\Doctrine\Database\QueryLoggerInterface;
+use JulienLinard\Doctrine\Database\SimpleQueryLogger;
 use JulienLinard\Doctrine\Metadata\MetadataReader;
 use JulienLinard\Doctrine\Repository\EntityRepository;
 use JulienLinard\Doctrine\Repository\RepositoryInterface;
@@ -1152,6 +1154,39 @@ class EntityManager
     public function rollback(): void
     {
         $this->connection->rollback();
+    }
+
+    /**
+     * Active le logging des requêtes SQL
+     * 
+     * @param bool $enabled Activer le logging
+     * @param string|null $logFile Chemin vers le fichier de log (optionnel)
+     * @param bool $logToConsole Logger aussi dans la console (pour debug)
+     * @return QueryLoggerInterface Le logger configuré
+     */
+    public function enableQueryLog(bool $enabled = true, ?string $logFile = null, bool $logToConsole = false): QueryLoggerInterface
+    {
+        $logger = new SimpleQueryLogger($enabled, $logFile, $logToConsole);
+        $this->connection->setQueryLogger($logger);
+        return $logger;
+    }
+
+    /**
+     * Désactive le logging des requêtes SQL
+     */
+    public function disableQueryLog(): void
+    {
+        $this->connection->setQueryLogger(null);
+    }
+
+    /**
+     * Retourne le logger de requêtes actuel
+     * 
+     * @return QueryLoggerInterface|null
+     */
+    public function getQueryLogger(): ?QueryLoggerInterface
+    {
+        return $this->connection->getQueryLogger();
     }
 
     /**
