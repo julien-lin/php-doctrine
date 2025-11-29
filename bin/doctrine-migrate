@@ -260,12 +260,12 @@ function loadDatabaseConfig(): ?array
     ];
     
     foreach ($searchPaths as $configPath) {
-        if (file_exists($configPath)) {
-            $config = require $configPath;
-            if (is_array($config)) {
-                return $config;
-            }
+    if (file_exists($configPath)) {
+        $config = require $configPath;
+        if (is_array($config)) {
+            return $config;
         }
+    }
     }
     
     // 6. Variables d'environnement DB_*
