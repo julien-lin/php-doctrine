@@ -139,9 +139,13 @@ class MigrationManager
             $result = $this->connection->fetchOne($sql, [$tableName]);
             return $result !== null;
         } else {
-            $sql = "SHOW TABLES LIKE ?";
-            $result = $this->connection->fetchOne($sql, [$tableName]);
-            return $result !== null;
+            // Utiliser INFORMATION_SCHEMA qui supporte les paramètres préparés
+            $dbName = $this->connection->getPdo()->query('SELECT DATABASE()')->fetchColumn();
+            $sql = "SELECT COUNT(*) as count 
+                    FROM INFORMATION_SCHEMA.TABLES 
+                    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?";
+            $result = $this->connection->fetchOne($sql, [$dbName, $tableName]);
+            return isset($result['count']) && (int)$result['count'] > 0;
         }
     }
     
