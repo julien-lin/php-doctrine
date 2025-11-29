@@ -41,6 +41,27 @@ require_once $autoloadPath;
 
 use JulienLinard\Doctrine\EntityManager;
 
+// Récupérer l'action depuis les arguments CLI
+$action = $argv[1] ?? 'status';
+$entityClass = null;
+
+// Récupérer les options (pour --steps)
+$options = [];
+for ($i = 1; $i < $argc; $i++) {
+    if (strpos($argv[$i], '--steps=') === 0) {
+        $options['steps'] = (int)substr($argv[$i], 8);
+    } elseif ($i === 2 && !str_starts_with($argv[$i], '--')) {
+        // Le deuxième argument sans -- est l'entité (pour generate)
+        $entityClass = $argv[$i];
+    }
+}
+
+// Si c'est help, afficher l'aide sans charger la config
+if ($action === 'help') {
+    showHelp();
+    exit(0);
+}
+
 // Charger la configuration
 $config = loadDatabaseConfig();
 
@@ -69,18 +90,6 @@ try {
 } catch (\Exception $e) {
     echo "❌ Erreur de connexion : {$e->getMessage()}\n";
     exit(1);
-}
-
-// Récupérer l'action depuis les arguments CLI
-$action = $argv[1] ?? 'status';
-$entityClass = $argv[2] ?? null;
-
-// Récupérer les options (pour --steps)
-$options = [];
-for ($i = 2; $i < $argc; $i++) {
-    if (strpos($argv[$i], '--steps=') === 0) {
-        $options['steps'] = (int)substr($argv[$i], 8);
-    }
 }
 
 try {
@@ -525,6 +534,9 @@ function showStatus(EntityManager $em): void
         echo "Aucune migration trouvée dans {$migrationsPath}\n";
         return;
     }
+    
+    $applied = 0;
+    $pending = 0;
     
     foreach ($files as $file) {
         $migrationName = basename($file, '.sql');
