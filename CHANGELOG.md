@@ -5,6 +5,14 @@ Tous les changements notables de ce projet seront documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2025-11-29
+
+### Corrigé
+- **MigrationManager** : Correction de la méthode `tableExists()` pour MySQL/MariaDB
+  - Remplacement de `SHOW TABLES LIKE ?` par `INFORMATION_SCHEMA.TABLES` qui supporte les paramètres préparés
+  - Résout l'erreur SQL "Syntax error or access violation: 1064" lors de la vérification de l'existence des tables
+  - Compatible avec les paramètres préparés PDO
+
 ## [1.1.2] - 2025-11-29
 
 ### Corrigé
