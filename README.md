@@ -471,9 +471,9 @@ $user = $em->transaction(function($em) {
 });
 // Automatically commits on success, rolls back on exception
 ```
-
+    
 #### Manual Transaction
-
+    
 ```php
 $em->beginTransaction();
 try {
@@ -712,41 +712,41 @@ $em->disableQueryLog();
 ### Performance
 
 1. **Use batch operations** for multiple inserts:
-   ```php
+```php
    $em->persistBatch($entities); // Instead of loop with persist()
-   ```
+```
 
 2. **Use eager loading** to avoid N+1 queries:
-   ```php
+```php
    $users = $repository->findAllWith(['posts']); // Optimized
-   ```
+```
 
 3. **Enable query cache** for frequently accessed data:
-   ```php
+```php
    $users = $repository->findAll(true, 3600);
-   ```
+```
 
 4. **Use transactions** for multiple operations:
-   ```php
+```php
    $em->transaction(function($em) { /* ... */ });
-   ```
+```
 
 ### Code Quality
 
 1. **Use `findOrFail()`** instead of checking for null:
-   ```php
+```php
    $user = $repository->findOrFail(1); // Throws exception if not found
-   ```
+```
 
 2. **Use custom repositories** for complex queries:
-   ```php
+```php
    $userRepo = $em->createRepository(UserRepository::class, User::class);
-   ```
+```
 
 3. **Enable query logging** during development:
-   ```php
+```php
    $em->enableQueryLog(true, 'queries.log', true);
-   ```
+```
 
 ---
 

@@ -488,7 +488,7 @@ class EntityRepository implements RepositoryInterface
                 continue;
             }
             
-            $relation = $metadata['relations'][$relationName];
+                    $relation = $metadata['relations'][$relationName];
             if ($relation['type'] !== 'OneToMany') {
                 continue;
             }

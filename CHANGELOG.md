@@ -5,6 +5,19 @@ Tous les changements notables de ce projet seront documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2025-11-29
+
+### Amélioré
+- **CLI Migrations** : Amélioration de la détection automatique de la configuration
+  - Détection automatique de `www/config/database.php` (structure skeleton)
+  - Détection automatique de `src/config/database.php`
+  - Détection automatique du dossier migrations dans `www/migrations/` et `src/migrations/`
+  - Messages d'erreur améliorés avec le répertoire courant affiché
+- **Script CLI** : Le binaire `doctrine-migrate` est maintenant disponible via Composer
+  - Accessible via `vendor/bin/doctrine-migrate` après installation
+  - Plus besoin de créer un fichier `migrate.php` manuel dans les applications
+  - Fonctionne comme Doctrine ORM dans Symfony
+
 ## [1.1.0] - 2025-11-28
 
 ### Ajouté
