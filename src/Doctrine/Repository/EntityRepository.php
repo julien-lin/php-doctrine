@@ -389,6 +389,7 @@ class EntityRepository implements RepositoryInterface
     
     /**
      * Trouve toutes les entités avec leurs relations chargées (eager loading)
+     * Optimisé pour éviter les requêtes N+1 en utilisant des requêtes batch avec IN()
      * 
      * @param array $relations Liste des relations à charger (ex: ['posts', 'comments'])
      * @return array Tableau d'entités avec relations chargées
@@ -397,20 +398,116 @@ class EntityRepository implements RepositoryInterface
     {
         $entities = $this->findAll();
         
+        if (empty($entities) || empty($relations)) {
+            return $entities;
+        }
+        
+        // Optimisation N+1 : charger toutes les relations en batch
+        $this->loadOneToManyRelationsBatch($entities, $relations);
+        
+        return $entities;
+    }
+    
+    /**
+     * Charge les relations OneToMany pour plusieurs entités en une seule requête (optimisation N+1)
+     * 
+     * @param array $entities Tableau d'entités pour lesquelles charger les relations
+     * @param array $relationNames Liste des noms de relations à charger
+     * @return void
+     */
+    private function loadOneToManyRelationsBatch(array $entities, array $relationNames): void
+    {
+        if (empty($entities)) {
+            return;
+        }
+        
+        $metadata = $this->metadataReader->getMetadata($this->entityClass);
+        $reflection = new ReflectionClass($this->entityClass);
+        
+        // Collecter tous les IDs des entités
+        $entityIds = [];
+        $entityMap = []; // Map ID => entité pour assignation rapide
+        
+        $idProperty = $reflection->getProperty($metadata['id']);
+        $idProperty->setAccessible(true);
+        
         foreach ($entities as $entity) {
-            // Charger les relations OneToMany demandées
-            foreach ($relations as $relationName) {
-                $metadata = $this->metadataReader->getMetadata($this->entityClass);
-                if (isset($metadata['relations'][$relationName])) {
-                    $relation = $metadata['relations'][$relationName];
-                    if ($relation['type'] === 'OneToMany') {
-                        $this->loadOneToManyRelations($entity);
-                    }
-                }
+            $entityId = $idProperty->getValue($entity);
+            if ($entityId !== null) {
+                $entityIds[] = $entityId;
+                $entityMap[$entityId] = $entity;
             }
         }
         
-        return $entities;
+        if (empty($entityIds)) {
+            return;
+        }
+        
+        // Pour chaque relation demandée, charger toutes les entités liées en une seule requête
+        foreach ($relationNames as $relationName) {
+            if (!isset($metadata['relations'][$relationName])) {
+                continue;
+            }
+            
+            $relation = $metadata['relations'][$relationName];
+            if ($relation['type'] !== 'OneToMany') {
+                continue;
+            }
+            
+            // Créer le repository pour l'entité cible
+            $targetRepository = new EntityRepository(
+                $this->connection,
+                $this->metadataReader,
+                $relation['targetEntity'],
+                $this->queryCache
+            );
+            
+            $targetMetadata = $this->metadataReader->getMetadata($relation['targetEntity']);
+            $mappedBy = $relation['mappedBy'];
+            
+            // Trouver la colonne de jointure dans l'entité cible
+            $joinColumn = null;
+            foreach ($targetMetadata['relations'] ?? [] as $targetProp => $targetRel) {
+                if ($targetRel['type'] === 'ManyToOne' && $targetRel['joinColumn']) {
+                    $joinColumn = $targetRel['joinColumn'];
+                    break;
+                }
+            }
+            
+            if ($joinColumn === null) {
+                $joinColumn = $mappedBy . '_id';
+            }
+            
+            // OPTIMISATION : Une seule requête avec IN() pour charger toutes les relations
+            $targetTable = $this->metadataReader->getTableName($relation['targetEntity']);
+            $placeholders = implode(',', array_fill(0, count($entityIds), '?'));
+            $sql = "SELECT * FROM {$targetTable} WHERE {$joinColumn} IN ({$placeholders})";
+            
+            $rows = $this->connection->fetchAll($sql, $entityIds);
+            
+            // Grouper les résultats par ID parent
+            $groupedResults = [];
+            foreach ($rows as $row) {
+                $parentId = $row[$joinColumn];
+                if (!isset($groupedResults[$parentId])) {
+                    $groupedResults[$parentId] = [];
+                }
+                $groupedResults[$parentId][] = $row;
+            }
+            
+            // Hydrater les entités liées et les assigner aux entités parentes
+            $property = $reflection->getProperty($relationName);
+            $property->setAccessible(true);
+            
+            foreach ($entityMap as $entityId => $entity) {
+                $relatedRows = $groupedResults[$entityId] ?? [];
+                $relatedEntities = array_map(
+                    fn($row) => $targetRepository->hydrate($row),
+                    $relatedRows
+                );
+                $property->setValue($entity, $relatedEntities);
+            }
+        }
     }
 
     /**
