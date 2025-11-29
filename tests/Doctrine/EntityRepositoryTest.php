@@ -190,6 +190,50 @@ class EntityRepositoryTest extends TestCase
         $this->assertTrue($user->isActive);
     }
     
+    public function testFindOrFail(): void
+    {
+        $this->insertTestData();
+        
+        $repository = $this->em->getRepository(TestUserEntity::class);
+        
+        // Trouver une entité existante
+        $user = $repository->findOrFail(1);
+        $this->assertNotNull($user);
+        $this->assertEquals(1, $user->id);
+        $this->assertEquals('test1@example.com', $user->email);
+    }
+    
+    public function testFindOrFailNotFound(): void
+    {
+        $this->expectException(\JulienLinard\Doctrine\Exceptions\EntityNotFoundException::class);
+        $this->expectExceptionMessage('L\'entité');
+        
+        $repository = $this->em->getRepository(TestUserEntity::class);
+        $repository->findOrFail(999);
+    }
+    
+    public function testFindOneByOrFail(): void
+    {
+        $this->insertTestData();
+        
+        $repository = $this->em->getRepository(TestUserEntity::class);
+        
+        // Trouver une entité existante
+        $user = $repository->findOneByOrFail(['email' => 'test2@example.com']);
+        $this->assertNotNull($user);
+        $this->assertEquals('test2@example.com', $user->email);
+        $this->assertEquals('User 2', $user->name);
+    }
+    
+    public function testFindOneByOrFailNotFound(): void
+    {
+        $this->expectException(\JulienLinard\Doctrine\Exceptions\DoctrineException::class);
+        $this->expectExceptionMessage('n\'a pas été trouvée');
+        
+        $repository = $this->em->getRepository(TestUserEntity::class);
+        $repository->findOneByOrFail(['email' => 'notfound@example.com']);
+    }
+    
     private function createTestTable(): void
     {
         $sql = "CREATE TABLE IF NOT EXISTS test_users (
