@@ -166,6 +166,25 @@ class MigrationGenerator
                     $columns[] = "{$fkColumnEscaped} INT NOT NULL";
                 }
                 
+                // OPTIMISATION : Ajouter automatiquement un index sur la colonne de jointure
+                // Les foreign keys sont très utilisées dans les requêtes de relations
+                $fkColumnEscaped = $this->escapeIdentifier($fkColumn);
+                $fkIndexName = 'idx_' . $metadata['table'] . '_' . $fkColumn;
+                $fkIndexNameEscaped = $this->escapeIdentifier($fkIndexName);
+                
+                // Vérifier qu'un index n'existe pas déjà pour cette colonne
+                $indexExists = false;
+                foreach ($metadata['indexes'] ?? [] as $indexInfo) {
+                    if ($indexInfo['column'] === $fkColumn) {
+                        $indexExists = true;
+                        break;
+                    }
+                }
+                
+                if (!$indexExists) {
+                    $indexes[] = "INDEX {$fkIndexNameEscaped} ({$fkColumnEscaped})";
+                }
+                
                 // Récupérer les métadonnées de l'entité cible
                 try {
                     $targetMetadata = $this->metadataReader->getMetadata($relation['targetEntity']);
@@ -174,7 +193,6 @@ class MigrationGenerator
                     $targetIdName = $targetIdInfo['name'] ?? $targetIdColumn;
                     
                     $fkNameEscaped = $this->escapeIdentifier('fk_' . $metadata['table'] . '_' . $fkColumn);
-                    $fkColumnEscaped = $this->escapeIdentifier($fkColumn);
                     $targetTableEscaped = $this->escapeIdentifier($targetMetadata['table']);
                     $targetIdEscaped = $this->escapeIdentifier($targetIdName);
                     
