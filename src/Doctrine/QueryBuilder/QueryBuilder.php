@@ -20,9 +20,13 @@ class QueryBuilder
     private array $join = [];
     private array $orderBy = [];
     private array $groupBy = [];
+    private array $having = [];
     private ?int $limit = null;
     private ?int $offset = null;
     private array $parameters = [];
+    private array $unions = [];
+    private bool $unionAll = false;
+    private int $paramCounter = 0;
 
     /**
      * Constructeur
@@ -78,7 +82,7 @@ class QueryBuilder
     public function where(string $condition, mixed $value = null): self
     {
         if ($value !== null) {
-            $paramName = 'param_' . count($this->parameters);
+            $paramName = 'param_' . $this->paramCounter++;
             $this->where[] = str_replace('?', ':' . $paramName, $condition);
             $this->parameters[$paramName] = $value;
         } else {
@@ -93,7 +97,7 @@ class QueryBuilder
     public function andWhere(string $condition, mixed $value = null): self
     {
         if ($value !== null) {
-            $paramName = 'param_' . count($this->parameters);
+            $paramName = 'param_' . $this->paramCounter++;
             $this->where[] = 'AND ' . str_replace('?', ':' . $paramName, $condition);
             $this->parameters[$paramName] = $value;
         } else {
@@ -108,7 +112,7 @@ class QueryBuilder
     public function orWhere(string $condition, mixed $value = null): self
     {
         if ($value !== null) {
-            $paramName = 'param_' . count($this->parameters);
+            $paramName = 'param_' . $this->paramCounter++;
             $this->where[] = 'OR ' . str_replace('?', ':' . $paramName, $condition);
             $this->parameters[$paramName] = $value;
         } else {
@@ -158,6 +162,255 @@ class QueryBuilder
     {
         $this->groupBy[] = $field;
         return $this;
+    }
+    
+    /**
+     * Ajoute une clause HAVING
+     *
+     * @param string $condition Condition HAVING
+     * @param mixed $value Valeur (optionnel)
+     * @return self Instance pour chaînage
+     */
+    public function having(string $condition, mixed $value = null): self
+    {
+        if ($value !== null) {
+            $paramName = 'having_param_' . $this->paramCounter++;
+            $this->having[] = str_replace('?', ':' . $paramName, $condition);
+            $this->parameters[$paramName] = $value;
+        } else {
+            $this->having[] = $condition;
+        }
+        return $this;
+    }
+    
+    /**
+     * Ajoute une clause AND HAVING
+     */
+    public function andHaving(string $condition, mixed $value = null): self
+    {
+        if ($value !== null) {
+            $paramName = 'having_param_' . $this->paramCounter++;
+            $this->having[] = 'AND ' . str_replace('?', ':' . $paramName, $condition);
+            $this->parameters[$paramName] = $value;
+        } else {
+            $this->having[] = 'AND ' . $condition;
+        }
+        return $this;
+    }
+    
+    /**
+     * Ajoute une clause OR HAVING
+     */
+    public function orHaving(string $condition, mixed $value = null): self
+    {
+        if ($value !== null) {
+            $paramName = 'having_param_' . $this->paramCounter++;
+            $this->having[] = 'OR ' . str_replace('?', ':' . $paramName, $condition);
+            $this->parameters[$paramName] = $value;
+        } else {
+            $this->having[] = 'OR ' . $condition;
+        }
+        return $this;
+    }
+    
+    /**
+     * Ajoute une fonction d'agrégation COUNT
+     *
+     * @param string $field Champ à compter
+     * @param string|null $alias Alias pour le résultat
+     * @return self Instance pour chaînage
+     */
+    public function count(string $field, ?string $alias = null): self
+    {
+        $expr = "COUNT({$field})";
+        if ($alias !== null) {
+            $expr .= " AS {$alias}";
+        }
+        $this->select[] = $expr;
+        return $this;
+    }
+    
+    /**
+     * Ajoute une fonction d'agrégation SUM
+     *
+     * @param string $field Champ à sommer
+     * @param string|null $alias Alias pour le résultat
+     * @return self Instance pour chaînage
+     */
+    public function sum(string $field, ?string $alias = null): self
+    {
+        $expr = "SUM({$field})";
+        if ($alias !== null) {
+            $expr .= " AS {$alias}";
+        }
+        $this->select[] = $expr;
+        return $this;
+    }
+    
+    /**
+     * Ajoute une fonction d'agrégation AVG
+     *
+     * @param string $field Champ pour la moyenne
+     * @param string|null $alias Alias pour le résultat
+     * @return self Instance pour chaînage
+     */
+    public function avg(string $field, ?string $alias = null): self
+    {
+        $expr = "AVG({$field})";
+        if ($alias !== null) {
+            $expr .= " AS {$alias}";
+        }
+        $this->select[] = $expr;
+        return $this;
+    }
+    
+    /**
+     * Ajoute une fonction d'agrégation MIN
+     *
+     * @param string $field Champ pour le minimum
+     * @param string|null $alias Alias pour le résultat
+     * @return self Instance pour chaînage
+     */
+    public function min(string $field, ?string $alias = null): self
+    {
+        $expr = "MIN({$field})";
+        if ($alias !== null) {
+            $expr .= " AS {$alias}";
+        }
+        $this->select[] = $expr;
+        return $this;
+    }
+    
+    /**
+     * Ajoute une fonction d'agrégation MAX
+     *
+     * @param string $field Champ pour le maximum
+     * @param string|null $alias Alias pour le résultat
+     * @return self Instance pour chaînage
+     */
+    public function max(string $field, ?string $alias = null): self
+    {
+        $expr = "MAX({$field})";
+        if ($alias !== null) {
+            $expr .= " AS {$alias}";
+        }
+        $this->select[] = $expr;
+        return $this;
+    }
+    
+    /**
+     * Ajoute une condition WHERE avec sous-requête
+     *
+     * @param string $field Champ à comparer
+     * @param string $operator Opérateur (IN, NOT IN, EXISTS, NOT EXISTS, etc.)
+     * @param callable|QueryBuilder $subquery Sous-requête (callable ou QueryBuilder)
+     * @return self Instance pour chaînage
+     */
+    public function whereSubquery(string $field, string $operator, callable|QueryBuilder $subquery): self
+    {
+        if (is_callable($subquery)) {
+            $subQb = new QueryBuilder($this->connection, $this->metadataReader);
+            $subquery($subQb);
+            $subSql = $subQb->buildSql();
+            $subParams = $subQb->getParameters();
+        } else {
+            $subSql = $subquery->buildSql();
+            $subParams = $subquery->getParameters();
+        }
+        
+        // Fusionner les paramètres de la sous-requête
+        foreach ($subParams as $key => $value) {
+            $newKey = 'subquery_' . $this->paramCounter++ . '_' . $key;
+            $subSql = str_replace(':' . $key, ':' . $newKey, $subSql);
+            $this->parameters[$newKey] = $value;
+        }
+        
+        $this->where[] = "{$field} {$operator} ({$subSql})";
+        return $this;
+    }
+    
+    /**
+     * Ajoute une condition WHERE EXISTS
+     *
+     * @param callable|QueryBuilder $subquery Sous-requête
+     * @return self Instance pour chaînage
+     */
+    public function whereExists(callable|QueryBuilder $subquery): self
+    {
+        if (is_callable($subquery)) {
+            $subQb = new QueryBuilder($this->connection, $this->metadataReader);
+            $subquery($subQb);
+            $subSql = $subQb->buildSql();
+            $subParams = $subQb->getParameters();
+        } else {
+            $subSql = $subquery->buildSql();
+            $subParams = $subquery->getParameters();
+        }
+        
+        // Fusionner les paramètres de la sous-requête
+        foreach ($subParams as $key => $value) {
+            $newKey = 'exists_' . $this->paramCounter++ . '_' . $key;
+            $subSql = str_replace(':' . $key, ':' . $newKey, $subSql);
+            $this->parameters[$newKey] = $value;
+        }
+        
+        $this->where[] = "EXISTS ({$subSql})";
+        return $this;
+    }
+    
+    /**
+     * Ajoute une condition WHERE NOT EXISTS
+     *
+     * @param callable|QueryBuilder $subquery Sous-requête
+     * @return self Instance pour chaînage
+     */
+    public function whereNotExists(callable|QueryBuilder $subquery): self
+    {
+        if (is_callable($subquery)) {
+            $subQb = new QueryBuilder($this->connection, $this->metadataReader);
+            $subquery($subQb);
+            $subSql = $subQb->buildSql();
+            $subParams = $subQb->getParameters();
+        } else {
+            $subSql = $subquery->buildSql();
+            $subParams = $subquery->getParameters();
+        }
+        
+        // Fusionner les paramètres de la sous-requête
+        foreach ($subParams as $key => $value) {
+            $newKey = 'not_exists_' . $this->paramCounter++ . '_' . $key;
+            $subSql = str_replace(':' . $key, ':' . $newKey, $subSql);
+            $this->parameters[$newKey] = $value;
+        }
+        
+        $this->where[] = "NOT EXISTS ({$subSql})";
+        return $this;
+    }
+    
+    /**
+     * Ajoute une UNION avec une autre requête
+     *
+     * @param QueryBuilder $queryBuilder Autre QueryBuilder à unir
+     * @param bool $all Si true, utilise UNION ALL
+     * @return self Instance pour chaînage
+     */
+    public function union(QueryBuilder $queryBuilder, bool $all = false): self
+    {
+        $this->unions[] = [
+            'query' => $queryBuilder,
+            'all' => $all,
+        ];
+        return $this;
+    }
+    
+    /**
+     * Récupère les paramètres de la requête
+     *
+     * @return array Paramètres
+     */
+    public function getParameters(): array
+    {
+        return $this->parameters;
     }
 
     /**
@@ -242,12 +495,26 @@ class QueryBuilder
         
         // WHERE
         if (!empty($this->where)) {
-            $sql .= ' WHERE ' . implode(' ', $this->where);
+            $whereClauses = [];
+            foreach ($this->where as $index => $condition) {
+                // Si ce n'est pas la première condition et qu'elle ne commence pas par AND/OR, ajouter AND
+                if ($index > 0 && !preg_match('/^\s*(AND|OR)\s+/i', $condition)) {
+                    $whereClauses[] = 'AND ' . $condition;
+                } else {
+                    $whereClauses[] = $condition;
+                }
+            }
+            $sql .= ' WHERE ' . implode(' ', $whereClauses);
         }
         
         // GROUP BY
         if (!empty($this->groupBy)) {
             $sql .= ' GROUP BY ' . implode(', ', $this->groupBy);
+        }
+        
+        // HAVING
+        if (!empty($this->having)) {
+            $sql .= ' HAVING ' . implode(' ', $this->having);
         }
         
         // ORDER BY
@@ -263,6 +530,25 @@ class QueryBuilder
         // OFFSET
         if ($this->offset !== null) {
             $sql .= ' OFFSET ' . $this->offset;
+        }
+        
+        // UNION
+        if (!empty($this->unions)) {
+            foreach ($this->unions as $union) {
+                $unionSql = $union['query']->buildSql();
+                $unionParams = $union['query']->getParameters();
+                
+                // Fusionner les paramètres de l'UNION
+                foreach ($unionParams as $key => $value) {
+                    $newKey = 'union_' . $this->paramCounter++ . '_' . $key;
+                    $unionSql = str_replace(':' . $key, ':' . $newKey, $unionSql);
+                    $this->parameters[$newKey] = $value;
+                }
+                
+                $unionType = $union['all'] ? 'UNION ALL' : 'UNION';
+                // SQLite et MySQL supportent UNION sans parenthèses autour de la sous-requête
+                $sql .= " {$unionType} {$unionSql}";
+            }
         }
         
         return $sql;

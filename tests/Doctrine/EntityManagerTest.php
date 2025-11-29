@@ -6,9 +6,7 @@ namespace JulienLinard\Doctrine\Tests;
 
 use PHPUnit\Framework\TestCase;
 use JulienLinard\Doctrine\EntityManager;
-use JulienLinard\Doctrine\Mapping\Entity;
-use JulienLinard\Doctrine\Mapping\Column;
-use JulienLinard\Doctrine\Mapping\Id;
+use JulienLinard\Doctrine\Tests\Fixtures\TestUser;
 
 /**
  * Tests pour EntityManager
@@ -125,22 +123,5 @@ class EntityManagerTest extends TestCase
         
         $this->em->getConnection()->execute($sql);
     }
-}
-
-/**
- * Classe de test pour les entités
- */
-#[Entity(table: 'test_users')]
-class TestUser
-{
-    #[Id]
-    #[Column(type: 'integer', autoIncrement: true)]
-    public ?int $id = null;
-    
-    #[Column(type: 'string', length: 255)]
-    public string $email;
-    
-    #[Column(type: 'string', length: 255)]
-    public string $name;
 }
 

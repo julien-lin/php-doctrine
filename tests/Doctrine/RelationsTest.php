@@ -6,11 +6,8 @@ namespace JulienLinard\Doctrine\Tests;
 
 use PHPUnit\Framework\TestCase;
 use JulienLinard\Doctrine\EntityManager;
-use JulienLinard\Doctrine\Mapping\Entity;
-use JulienLinard\Doctrine\Mapping\Column;
-use JulienLinard\Doctrine\Mapping\Id;
-use JulienLinard\Doctrine\Mapping\ManyToOne;
-use JulienLinard\Doctrine\Mapping\OneToMany;
+use JulienLinard\Doctrine\Tests\Fixtures\TestUserWithRelations;
+use JulienLinard\Doctrine\Tests\Fixtures\TestPostWithRelations;
 
 /**
  * Tests pour les relations
@@ -38,7 +35,7 @@ class RelationsTest extends TestCase
     public function testManyToOneRelation(): void
     {
         // Créer un utilisateur
-        $user = new TestUser();
+        $user = new TestUserWithRelations();
         $user->email = 'user@example.com';
         $user->name = 'Test User';
         $this->em->persist($user);
@@ -52,7 +49,7 @@ class RelationsTest extends TestCase
         
         // Charger le post
         $postId = (int)$this->em->getConnection()->getPdo()->lastInsertId();
-        $loadedPost = $this->em->find(TestPost::class, $postId);
+        $loadedPost = $this->em->find(TestPostWithRelations::class, $postId);
         
         $this->assertNotNull($loadedPost);
         $this->assertNotNull($loadedPost->user);
@@ -66,7 +63,7 @@ class RelationsTest extends TestCase
     public function testOneToManyRelation(): void
     {
         // Créer un utilisateur
-        $user = new TestUser();
+        $user = new TestUserWithRelations();
         $user->email = 'user@example.com';
         $user->name = 'Test User';
         $this->em->persist($user);
@@ -83,7 +80,7 @@ class RelationsTest extends TestCase
         );
         
         // Charger l'utilisateur
-        $loadedUser = $this->em->find(TestUser::class, $user->id);
+        $loadedUser = $this->em->find(TestUserWithRelations::class, $user->id);
         
         // Charger les relations OneToMany
         $this->em->loadRelations($loadedUser);
@@ -99,16 +96,16 @@ class RelationsTest extends TestCase
     public function testCascadePersist(): void
     {
         // Créer un utilisateur
-        $user = new TestUser();
+        $user = new TestUserWithRelations();
         $user->email = 'user@example.com';
         $user->name = 'Test User';
         
         // Créer des posts avec cascade
-        $post1 = new TestPost();
+        $post1 = new TestPostWithRelations();
         $post1->title = 'Post 1';
         $post1->content = 'Content 1';
         
-        $post2 = new TestPost();
+        $post2 = new TestPostWithRelations();
         $post2->title = 'Post 2';
         $post2->content = 'Content 2';
         
@@ -122,7 +119,7 @@ class RelationsTest extends TestCase
         $this->assertNotNull($user->id);
         
         // Vérifier les relations
-        $loadedUser = $this->em->find(TestUser::class, $user->id);
+        $loadedUser = $this->em->find(TestUserWithRelations::class, $user->id);
         $this->em->loadRelations($loadedUser);
         $this->assertCount(2, $loadedUser->posts);
     }
@@ -134,7 +131,7 @@ class RelationsTest extends TestCase
     {
         // Créer des utilisateurs avec posts
         for ($i = 1; $i <= 3; $i++) {
-            $user = new TestUser();
+            $user = new TestUserWithRelations();
             $user->email = "user{$i}@example.com";
             $user->name = "User {$i}";
             $this->em->persist($user);
@@ -150,7 +147,7 @@ class RelationsTest extends TestCase
         }
         
         // Charger tous les utilisateurs avec leurs posts (eager loading)
-        $repository = $this->em->getRepository(TestUser::class);
+        $repository = $this->em->getRepository(TestUserWithRelations::class);
         $users = $repository->findAllWith(['posts']);
         
         $this->assertCount(3, $users);
@@ -179,42 +176,5 @@ class RelationsTest extends TestCase
             )"
         );
     }
-}
-
-#[Entity(table: 'test_users')]
-class TestUser
-{
-    #[Id]
-    #[Column(type: 'integer', autoIncrement: true)]
-    public ?int $id = null;
-    
-    #[Column(type: 'string', length: 255)]
-    public string $email;
-    
-    #[Column(type: 'string', length: 255)]
-    public string $name;
-    
-    #[OneToMany(targetEntity: TestPost::class, mappedBy: 'user', cascade: ['persist', 'remove'])]
-    public array $posts = [];
-}
-
-#[Entity(table: 'test_posts')]
-class TestPost
-{
-    #[Id]
-    #[Column(type: 'integer', autoIncrement: true)]
-    public ?int $id = null;
-    
-    #[Column(type: 'string', length: 255)]
-    public string $title;
-    
-    #[Column(type: 'text', nullable: true)]
-    public ?string $content = null;
-    
-    #[Column(type: 'integer', name: 'user_id')]
-    public ?int $userId = null;
-    
-    #[ManyToOne(targetEntity: TestUser::class, joinColumn: 'user_id')]
-    public ?TestUser $user = null;
 }
 

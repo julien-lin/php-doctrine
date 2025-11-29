@@ -6,6 +6,7 @@ namespace JulienLinard\Doctrine\Repository;
 
 use JulienLinard\Doctrine\Database\Connection;
 use JulienLinard\Doctrine\Metadata\MetadataReader;
+use JulienLinard\Doctrine\Cache\QueryCache;
 use ReflectionClass;
 
 /**
@@ -18,6 +19,7 @@ class EntityRepository implements RepositoryInterface
     protected string $entityClass;
     protected string $tableName;
     protected ?string $idProperty;
+    protected ?QueryCache $queryCache = null;
 
     /**
      * Constructeur
@@ -25,17 +27,41 @@ class EntityRepository implements RepositoryInterface
      * @param Connection $connection Connexion à la base de données
      * @param MetadataReader $metadataReader Lecteur de métadonnées
      * @param string $entityClass Classe de l'entité
+     * @param QueryCache|null $queryCache Cache de requêtes (optionnel)
      */
     public function __construct(
         Connection $connection,
         MetadataReader $metadataReader,
-        string $entityClass
+        string $entityClass,
+        ?QueryCache $queryCache = null
     ) {
         $this->connection = $connection;
         $this->metadataReader = $metadataReader;
         $this->entityClass = $entityClass;
         $this->tableName = $metadataReader->getTableName($entityClass);
         $this->idProperty = $metadataReader->getIdProperty($entityClass);
+        $this->queryCache = $queryCache;
+    }
+    
+    /**
+     * Définit le cache de requêtes
+     * 
+     * @param QueryCache|null $queryCache Cache de requêtes
+     * @return void
+     */
+    public function setQueryCache(?QueryCache $queryCache): void
+    {
+        $this->queryCache = $queryCache;
+    }
+    
+    /**
+     * Retourne le cache de requêtes
+     * 
+     * @return QueryCache|null Cache de requêtes
+     */
+    public function getQueryCache(): ?QueryCache
+    {
+        return $this->queryCache;
     }
 
     /**
@@ -94,20 +120,58 @@ class EntityRepository implements RepositoryInterface
 
     /**
      * Trouve toutes les entités
+     * 
+     * @param bool $useCache Utiliser le cache (défaut: false)
+     * @param int|null $cacheTtl TTL du cache en secondes (null = TTL par défaut)
+     * @return array Tableau d'entités
      */
-    public function findAll(): array
+    public function findAll(bool $useCache = false, ?int $cacheTtl = null): array
     {
         $tableName = $this->escapeIdentifier($this->tableName);
         $sql = "SELECT * FROM {$tableName}";
-        $rows = $this->connection->fetchAll($sql);
-        return array_map([$this, 'hydrate'], $rows);
+        $params = [];
+        
+        // Vérifier le cache si activé
+        if ($useCache && $this->queryCache !== null && $this->queryCache->isEnabled()) {
+            $cacheKey = $this->queryCache->generateKey($sql, $params);
+            $cached = $this->queryCache->get($cacheKey);
+            
+            if ($cached !== null) {
+                return $this->hydrateFromCache($cached);
+            }
+        }
+        
+        $rows = $this->connection->fetchAll($sql, $params);
+        $entities = array_map([$this, 'hydrate'], $rows);
+        
+        // Mettre en cache si activé
+        if ($useCache && $this->queryCache !== null && $this->queryCache->isEnabled()) {
+            $cacheKey = $this->queryCache->generateKey($sql, $params);
+            $this->queryCache->set($cacheKey, $rows, $cacheTtl);
+        }
+        
+        return $entities;
     }
 
     /**
      * Trouve des entités par critères
+     * 
+     * @param array $criteria Critères de recherche
+     * @param array|null $orderBy Tri (ex: ['name' => 'ASC'])
+     * @param int|null $limit Limite
+     * @param int|null $offset Offset
+     * @param bool $useCache Utiliser le cache (défaut: false)
+     * @param int|null $cacheTtl TTL du cache en secondes (null = TTL par défaut)
+     * @return array Tableau d'entités
      */
-    public function findBy(array $criteria, ?array $orderBy = null, ?int $limit = null, ?int $offset = null): array
-    {
+    public function findBy(
+        array $criteria, 
+        ?array $orderBy = null, 
+        ?int $limit = null, 
+        ?int $offset = null,
+        bool $useCache = false,
+        ?int $cacheTtl = null
+    ): array {
         $tableName = $this->escapeIdentifier($this->tableName);
         $sql = "SELECT * FROM {$tableName}";
         $params = [];
@@ -150,8 +214,29 @@ class EntityRepository implements RepositoryInterface
             $sql .= " OFFSET " . (int)$offset;
         }
 
+        // Vérifier le cache si activé
+        if ($useCache && $this->queryCache !== null && $this->queryCache->isEnabled()) {
+            $cacheKey = $this->queryCache->generateKey($sql, $params);
+            $cached = $this->queryCache->get($cacheKey);
+            
+            if ($cached !== null) {
+                // Désérialiser les entités depuis le cache
+                return $this->hydrateFromCache($cached);
+            }
+        }
+
         $rows = $this->connection->fetchAll($sql, $params);
-        return array_map([$this, 'hydrate'], $rows);
+        $entities = array_map([$this, 'hydrate'], $rows);
+        
+        // Mettre en cache si activé
+        if ($useCache && $this->queryCache !== null && $this->queryCache->isEnabled()) {
+            $cacheKey = $this->queryCache->generateKey($sql, $params);
+            // Sérialiser les données brutes pour le cache (pas les objets)
+            $cacheData = $rows; // Stocker les données brutes plutôt que les objets
+            $this->queryCache->set($cacheKey, $cacheData, $cacheTtl);
+        }
+        
+        return $entities;
     }
 
     /**
@@ -347,6 +432,17 @@ class EntityRepository implements RepositoryInterface
             'json' => is_string($value) ? json_decode($value, true) : $value,
             default => $value,
         };
+    }
+    
+    /**
+     * Hydrate des entités depuis les données du cache
+     * 
+     * @param array $cachedData Données en cache (tableau de tableaux)
+     * @return array Tableau d'entités
+     */
+    private function hydrateFromCache(array $cachedData): array
+    {
+        return array_map([$this, 'hydrate'], $cachedData);
     }
 }
 
