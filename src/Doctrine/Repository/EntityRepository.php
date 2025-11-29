@@ -249,6 +249,45 @@ class EntityRepository implements RepositoryInterface
     }
 
     /**
+     * Trouve une entité par ID ou lève une exception si non trouvée
+     * 
+     * @param int|string $id Identifiant de l'entité
+     * @return object Entité trouvée
+     * @throws \JulienLinard\Doctrine\Exceptions\EntityNotFoundException Si l'entité n'est pas trouvée
+     */
+    public function findOrFail(int|string $id): object
+    {
+        $entity = $this->find($id);
+        
+        if ($entity === null) {
+            throw new \JulienLinard\Doctrine\Exceptions\EntityNotFoundException($this->entityClass, $id);
+        }
+        
+        return $entity;
+    }
+
+    /**
+     * Trouve une entité par critères ou lève une exception si non trouvée
+     * 
+     * @param array $criteria Critères de recherche
+     * @return object Entité trouvée
+     * @throws \JulienLinard\Doctrine\Exceptions\DoctrineException Si l'entité n'est pas trouvée
+     */
+    public function findOneByOrFail(array $criteria): object
+    {
+        $entity = $this->findOneBy($criteria);
+        
+        if ($entity === null) {
+            $criteriaStr = json_encode($criteria, JSON_UNESCAPED_UNICODE);
+            throw new \JulienLinard\Doctrine\Exceptions\DoctrineException(
+                "L'entité {$this->entityClass} avec les critères {$criteriaStr} n'a pas été trouvée."
+            );
+        }
+        
+        return $entity;
+    }
+
+    /**
      * Hydrate une entité depuis un tableau de données
      *
      * @param array $row Données de la base
