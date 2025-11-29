@@ -160,7 +160,7 @@ class MigrationManager
                 $sql = "SELECT COUNT(*) as count 
                         FROM INFORMATION_SCHEMA.TABLES 
                         WHERE TABLE_NAME = ?";
-                $result = $this->connection->fetchOne($sql, [$tableName]);
+            $result = $this->connection->fetchOne($sql, [$tableName]);
                 return isset($result['count']) && (int)$result['count'] > 0;
             }
         }
