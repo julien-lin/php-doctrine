@@ -5,6 +5,15 @@ Tous les changements notables de ce projet seront documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2025-11-29
+
+### Corrigé
+- **CLI Migrations** : Chargement automatique du fichier `.env` avant la configuration
+  - Le script charge maintenant automatiquement le fichier `.env` s'il existe
+  - Support de `php-dotenv` si disponible, sinon parser basique intégré
+  - Détection automatique dans `.env`, `www/.env`, `src/.env`
+  - Résout l'erreur "Variable d'environnement obligatoire non définie" lors de l'utilisation du CLI
+
 ## [1.1.1] - 2025-11-29
 
 ### Amélioré
