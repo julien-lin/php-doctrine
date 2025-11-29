@@ -1,24 +1,37 @@
-# Doctrine PHP - Doctrine Style ORM
+# Doctrine PHP - Modern ORM for PHP 8+
 
 [🇫🇷 Read in French](README.fr.md) | [🇬🇧 Read in English](README.md)
 
-## 💝 Support the project
+[![PHP Version](https://img.shields.io/badge/php-%3E%3D8.0-blue.svg)](https://www.php.net/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-141%20passing-brightgreen.svg)](tests/)
 
-If this bundle is useful to you, consider [becoming a sponsor](https://github.com/sponsors/julien-lin) to support the development and maintenance of this open source project.
+A modern, lightweight ORM (Object-Relational Mapping) for PHP 8+ inspired by Doctrine ORM. Features Entity Manager, Repository Pattern, Query Builder, and PHP 8 Attributes mapping with automatic optimizations.
 
----
+## ✨ Features
 
-A modern ORM (Object-Relational Mapping) for PHP 8+ inspired by Doctrine, with Entity Manager, Repository Pattern, Query Builder and PHP 8 Attributes mapping.
+- 🚀 **Entity Manager** - Complete entity lifecycle management
+- 📦 **Repository Pattern** - Powerful repositories with CRUD methods
+- 🔨 **Query Builder** - Fluent SQL query construction
+- 🏷️ **PHP 8 Attributes** - Modern entity definition with attributes
+- 🔗 **Relations** - OneToMany, ManyToOne, ManyToMany support
+- 📊 **Migrations** - Automatic schema migration system with rollback
+- 🔄 **Transactions** - Full transaction support with automatic rollback
+- ⚡ **Performance** - Query cache, batch operations, N+1 optimization
+- 📝 **Query Logging** - Built-in SQL query logging for debugging
+- 🗄️ **Multi-DBMS** - MySQL, PostgreSQL, SQLite support
 
-## 🚀 Installation
+## 🚀 Quick Start
+
+### Installation
 
 ```bash
 composer require julienlinard/doctrine-php
 ```
 
-**Requirements**: PHP 8.0 or higher, PDO extension
+**Requirements**: PHP 8.0+ and PDO extension
 
-## ⚡ Quick Start
+### Basic Usage
 
 ```php
 <?php
@@ -42,7 +55,7 @@ class User
     public string $email;
     
     #[Column(type: 'string', length: 255)]
-    public string $password;
+    public string $name;
 }
 
 // Database configuration
@@ -54,39 +67,47 @@ $config = [
     'password' => 'password'
 ];
 
-// Create the Entity Manager
+// Create Entity Manager
 $em = new EntityManager($config);
 
 // Create a user
 $user = new User();
-$user->email = 'test@example.com';
-$user->password = password_hash('password', PASSWORD_BCRYPT);
+$user->email = 'john@example.com';
+$user->name = 'John Doe';
 $em->persist($user);
 $em->flush();
 
 // Retrieve a user
 $user = $em->getRepository(User::class)->find(1);
+echo $user->name; // John Doe
 ```
-
-## 📋 Features
-
-- ✅ **Entity Manager** - Entity lifecycle management
-- ✅ **Repository Pattern** - Repositories with CRUD methods
-- ✅ **Query Builder** - Fluent SQL query construction
-- ✅ **Attributes Mapping** - Entity definition with PHP 8 Attributes
-- ✅ **Relations** - OneToMany, ManyToOne, ManyToMany
-- ✅ **Migrations** - Schema migration system
-- ✅ **Transactions** - Transaction management
-- ✅ **Multi-DBMS** - MySQL, PostgreSQL, SQLite support
 
 ## 📖 Documentation
 
+### Table of Contents
+
+1. [Entity Definition](#entity-definition)
+2. [Entity Manager](#entity-manager)
+3. [Repository](#repository)
+4. [Query Builder](#query-builder)
+5. [Relations](#relations)
+6. [Transactions](#transactions)
+7. [Migrations](#migrations)
+8. [Performance Features](#performance-features)
+9. [Query Logging](#query-logging)
+10. [API Reference](#api-reference)
+
+---
+
 ### Entity Definition
+
+Entities are defined using PHP 8 attributes:
 
 ```php
 use JulienLinard\Doctrine\Mapping\Entity;
 use JulienLinard\Doctrine\Mapping\Column;
 use JulienLinard\Doctrine\Mapping\Id;
+use JulienLinard\Doctrine\Mapping\Index;
 
 #[Entity(table: 'users')]
 class User
@@ -96,6 +117,7 @@ class User
     public ?int $id = null;
     
     #[Column(type: 'string', length: 255)]
+    #[Index(unique: true)]
     public string $email;
     
     #[Column(type: 'string', length: 255, nullable: true)]
@@ -109,24 +131,43 @@ class User
 }
 ```
 
+#### Supported Column Types
+
+- `string` / `varchar` - VARCHAR with optional length
+- `text` - TEXT
+- `integer` / `int` - INT
+- `boolean` / `bool` - TINYINT(1) or BOOLEAN
+- `float` / `double` - DOUBLE
+- `decimal` - DECIMAL with precision/scale
+- `datetime` - DATETIME
+- `date` - DATE
+- `time` - TIME
+- `json` - JSON (auto serialization)
+
+---
+
 ### Entity Manager
 
-```php
-use JulienLinard\Doctrine\EntityManager;
+The Entity Manager is the central component for managing entities.
 
+#### Basic Operations
+
+```php
 $em = new EntityManager($config);
 
-// Persist an entity
+// Create
 $user = new User();
 $user->email = 'test@example.com';
+$user->name = 'Test User';
 $em->persist($user);
 $em->flush();
 
-// Retrieve an entity
+// Read
 $user = $em->find(User::class, 1);
 
 // Update
-$user->name = 'John Doe';
+$user->name = 'Updated Name';
+$em->persist($user); // Re-persist modified entity
 $em->flush();
 
 // Delete
@@ -134,9 +175,64 @@ $em->remove($user);
 $em->flush();
 ```
 
+#### Batch Operations
+
+Insert multiple entities efficiently with a single query:
+
+```php
+$users = [];
+for ($i = 1; $i <= 100; $i++) {
+    $user = new User();
+    $user->email = "user{$i}@example.com";
+    $user->name = "User {$i}";
+    $users[] = $user;
+}
+
+// Batch insert (optimized - single INSERT query)
+$em->persistBatch($users);
+$em->flush(); // Executes one INSERT with multiple VALUES
+```
+
+#### Transactions
+
+Simplified transaction management with automatic rollback:
+
+```php
+// Method 1: Automatic transaction (recommended)
+$result = $em->transaction(function($em) {
+    $user = new User();
+    $user->email = 'test@example.com';
+    $em->persist($user);
+    
+    $post = new Post();
+    $post->title = 'My Post';
+    $post->user = $user;
+    $em->persist($post);
+    
+    $em->flush();
+    return $user; // Return value is preserved
+});
+
+// Method 2: Manual transaction
+$em->beginTransaction();
+try {
+    $user = new User();
+    $em->persist($user);
+    $em->flush();
+    $em->commit();
+} catch (\Exception $e) {
+    $em->rollback();
+    throw $e;
+}
+```
+
+---
+
 ### Repository
 
-#### Standard Repository
+Repositories provide convenient methods for querying entities.
+
+#### Standard Methods
 
 ```php
 $repository = $em->getRepository(User::class);
@@ -150,44 +246,91 @@ $users = $repository->findAll();
 // Find by criteria
 $users = $repository->findBy(['is_active' => true]);
 $user = $repository->findOneBy(['email' => 'test@example.com']);
+
+// Find or fail (throws exception if not found)
+$user = $repository->findOrFail(1);
+$user = $repository->findOneByOrFail(['email' => 'test@example.com']);
+```
+
+#### Advanced Queries
+
+```php
+// With ordering
+$users = $repository->findBy(
+    ['is_active' => true],
+    ['created_at' => 'DESC']
+);
+
+// With pagination
+$users = $repository->findBy(
+    [],
+    ['name' => 'ASC'],
+    10,  // limit
+    0    // offset
+);
+
+// With query cache
+$users = $repository->findAll(true, 3600); // Cache for 1 hour
+$users = $repository->findBy(
+    ['is_active' => true],
+    null, null, null,
+    true,  // use cache
+    3600   // TTL
+);
+```
+
+#### Eager Loading (Optimized N+1)
+
+Load relations efficiently with batch loading:
+
+```php
+// Load users with their posts (optimized - avoids N+1 queries)
+$users = $repository->findAllWith(['posts']);
+
+// Each user now has $user->posts loaded
+foreach ($users as $user) {
+    foreach ($user->posts as $post) {
+        echo $post->title;
+    }
+}
 ```
 
 #### Custom Repository
 
-To create a custom repository with shared MetadataReader (recommended for performance):
+Create custom repositories with shared MetadataReader:
 
 ```php
 use JulienLinard\Doctrine\Repository\EntityRepository;
 
 class UserRepository extends EntityRepository
 {
-    public function __construct(EntityManager $em, string $entityClass)
-    {
-        // Use getMetadataReader() to share the instance
-        parent::__construct(
-            $em->getConnection(), 
-            $em->getMetadataReader(), 
-            $entityClass
-        );
-    }
-    
     public function findActiveUsers(): array
     {
         return $this->findBy(['is_active' => true]);
     }
+    
+    public function findByEmailDomain(string $domain): array
+    {
+        return $this->findBy([], ['email' => 'ASC'])
+            ->filter(fn($user) => str_ends_with($user->email, $domain));
+    }
 }
 
-// Create the custom repository
+// Create custom repository
 $userRepo = $em->createRepository(UserRepository::class, User::class);
 $activeUsers = $userRepo->findActiveUsers();
 ```
 
-**⚠️ Important**: Always use `$em->getMetadataReader()` instead of `new MetadataReader()` to avoid creating multiple instances and improve performance.
+---
 
 ### Query Builder
 
+Build complex SQL queries with a fluent interface:
+
 ```php
 $qb = $em->createQueryBuilder();
+
+// Basic query
 $users = $qb->select('u')
     ->from(User::class, 'u')
     ->where('u.email = :email')
@@ -197,7 +340,51 @@ $users = $qb->select('u')
     ->orderBy('u.created_at', 'DESC')
     ->setMaxResults(10)
     ->getResult();
+
+// Aggregations
+$stats = $qb->select('u')
+    ->from(User::class, 'u')
+    ->count('u.id', 'total')
+    ->sum('u.views', 'total_views')
+    ->avg('u.rating', 'avg_rating')
+    ->groupBy('u.category_id')
+    ->having('total > :min')
+    ->setParameter('min', 10)
+    ->getResult();
+
+// Subqueries
+$users = $qb->select('u')
+    ->from(User::class, 'u')
+    ->whereSubquery('u.id', 'IN', function($subQb) {
+        $subQb->from(Post::class, 'p')
+              ->select('p.user_id')
+              ->where('p.published = ?', true);
+    })
+    ->getResult();
+
+// EXISTS
+$users = $qb->select('u')
+    ->from(User::class, 'u')
+    ->whereExists(function($subQb) {
+        $subQb->from(Post::class, 'p')
+              ->where('p.user_id = u.id')
+              ->where('p.published = ?', true);
+    })
+    ->getResult();
+
+// UNION
+$qb1 = $em->createQueryBuilder()
+    ->from(User::class, 'u')
+    ->select('u.id', 'u.name');
+    
+$qb2 = $em->createQueryBuilder()
+    ->from(Admin::class, 'a')
+    ->select('a.id', 'a.name');
+    
+$all = $qb->union($qb1, $qb2)->getResult();
 ```
+
+---
 
 ### Relations
 
@@ -214,7 +401,7 @@ class User
     #[Column(type: 'integer', autoIncrement: true)]
     public ?int $id = null;
     
-    #[OneToMany(targetEntity: Post::class, mappedBy: 'user')]
+    #[OneToMany(targetEntity: Post::class, mappedBy: 'user', cascade: ['persist', 'remove'])]
     public array $posts = [];
 }
 
@@ -234,7 +421,12 @@ class Post
 
 // Usage
 $user = $em->getRepository(User::class)->find(1);
-$posts = $user->posts; // Array of Post
+
+// Load relations manually
+$em->loadRelations($user, 'posts');
+
+// Or use eager loading (optimized)
+$users = $repository->findAllWith(['posts']);
 ```
 
 #### ManyToMany
@@ -261,22 +453,32 @@ class Role
 }
 ```
 
+**Note**: Automatic indexes are created on foreign key columns for optimal query performance.
+
+---
+
 ### Transactions
 
-```php
-// Start a transaction
-$em->beginTransaction();
+#### Automatic Transaction (Recommended)
 
-try {
+```php
+$user = $em->transaction(function($em) {
     $user = new User();
     $user->email = 'test@example.com';
     $em->persist($user);
-    
-    $post = new Post();
-    $post->title = 'My post';
-    $post->user = $user;
-    $em->persist($post);
-    
+    $em->flush();
+    return $user;
+});
+// Automatically commits on success, rolls back on exception
+```
+
+#### Manual Transaction
+
+```php
+$em->beginTransaction();
+try {
+    $user = new User();
+    $em->persist($user);
     $em->flush();
     $em->commit();
 } catch (\Exception $e) {
@@ -285,102 +487,59 @@ try {
 }
 ```
 
+---
+
 ### Migrations
 
-The migration system allows you to automatically generate SQL migrations from your Doctrine entities.
+Generate and execute database migrations automatically.
 
-#### Migration Generation
+#### Generate Migrations
 
 ```php
-use JulienLinard\Doctrine\EntityManager;
-use App\Entity\User;
-use App\Entity\Todo;
-
-$em = new EntityManager($config);
-
-// Generate a migration for an entity
+// Generate for one entity
 $sql = $em->generateMigration(User::class);
-echo $sql;
 
-// Generate migrations for multiple entities
-$sql = $em->generateMigrations([User::class, Todo::class]);
+// Generate for multiple entities
+$sql = $em->generateMigrations([User::class, Post::class]);
 ```
 
-#### Migration Execution
+#### CLI Commands
 
-```php
-use JulienLinard\Doctrine\EntityManager;
-
-$em = new EntityManager($config);
-$runner = $em->getMigrationRunner();
-$manager = $em->getMigrationManager();
-
-// Generate migration name
-$migrationName = $manager->generateMigrationName();
-
-// Execute migration
-$sql = $em->generateMigration(User::class);
-if (!empty($sql)) {
-    $runner->run($sql);
-    $manager->markAsExecuted($migrationName);
-    echo "Migration {$migrationName} applied successfully.\n";
-}
-```
-
-#### Check Applied Migrations
-
-```php
-$manager = $em->getMigrationManager();
-$executed = $manager->getExecutedMigrations();
-
-foreach ($executed as $migration) {
-    echo "✅ {$migration}\n";
-}
-```
-
-#### Integrated CLI Script (Recommended)
-
-The package includes a ready-to-use CLI script that automatically detects your database configuration.
-
-**Direct usage from the package**:
+The package includes a ready-to-use CLI script:
 
 ```bash
-# From your project (after installation via composer)
-php vendor/julienlinard/doctrine-php/bin/doctrine-migrate generate
-php vendor/julienlinard/doctrine-php/bin/doctrine-migrate migrate
-php vendor/julienlinard/doctrine-php/bin/doctrine-migrate status
-```
-
-**Or via Composer**:
-
-```bash
-composer exec doctrine-migrate generate
-composer exec doctrine-migrate migrate
-composer exec doctrine-migrate status
-```
-
-**Create a symbolic link (recommended)**:
-
-```bash
-# Create a symbolic link in your project
-ln -s vendor/julienlinard/doctrine-php/bin/doctrine-migrate bin/doctrine-migrate
-
-# Then use directly
+# Generate migration
 php bin/doctrine-migrate generate
+
+# Generate for specific entity
+php bin/doctrine-migrate generate App\Entity\User
+
+# Execute migrations
 php bin/doctrine-migrate migrate
+
+# Rollback last migration
+php bin/doctrine-migrate rollback
+
+# Rollback multiple migrations
+php bin/doctrine-migrate rollback --steps=3
+
+# Check status
 php bin/doctrine-migrate status
+
+# Show help
+php bin/doctrine-migrate help
 ```
 
-**Automatic Configuration**:
+#### Configuration
 
-The script automatically searches for configuration in this order:
+The CLI script automatically detects configuration from:
 
 1. Environment variable `DOCTRINE_CONFIG` (path to PHP file)
 2. `config/database.php` (from current directory)
 3. `../config/database.php` (from current directory)
 4. Environment variables `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`
 
-**Example `config/database.php` file**:
+**Example `config/database.php`**:
 
 ```php
 <?php
@@ -395,429 +554,250 @@ return [
 ];
 ```
 
-**Available Commands**:
+#### Migration Rollback
 
-- `generate [EntityClass]` - Generates a migration for an entity or all entities
-- `migrate` - Executes pending migrations
-- `status` - Shows migration status
-- `help` - Shows help
+Migrations can be rolled back using the CLI:
 
-#### Custom CLI Script (Optional)
+```bash
+# Rollback last migration
+php bin/doctrine-migrate rollback
 
-If you prefer to create your own custom CLI script:
+# Rollback 3 migrations
+php bin/doctrine-migrate rollback --steps=3
+```
 
-**Create `bin/migrate.php` in your application**:
+The system supports:
+- Automatic rollback generation (CREATE TABLE → DROP TABLE)
+- Custom rollback files (`migration_name_down.sql`)
+- Migration classes implementing `MigrationInterface` with `down()` method
+
+---
+
+### Performance Features
+
+#### Query Cache
+
+Cache query results to improve performance:
 
 ```php
-#!/usr/bin/env php
-<?php
+// Enable query cache
+$queryCache = new \JulienLinard\Doctrine\Cache\QueryCache(
+    defaultTtl: 3600,  // 1 hour
+    enabled: true
+);
 
-require_once __DIR__ . '/../vendor/autoload.php';
+$em = new EntityManager($config, $queryCache);
 
-use JulienLinard\Doctrine\EntityManager;
+// Use cache in repositories
+$users = $repository->findAll(true, 3600); // Cache for 1 hour
+$users = $repository->findBy(
+    ['is_active' => true],
+    null, null, null,
+    true,  // use cache
+    3600   // TTL
+);
 
-// Load configuration
-$config = require __DIR__ . '/../config/database.php';
-$em = new EntityManager($config);
-
-// Get action from CLI arguments
-$action = $argv[1] ?? 'status';
-$entityClass = $argv[2] ?? null;
-
-try {
-    match ($action) {
-        'generate' => generateMigration($em, $entityClass),
-        'migrate' => executeMigrations($em),
-        'status' => showStatus($em),
-        default => throw new \InvalidArgumentException(
-            "Unknown action: {$action}. Use 'generate', 'migrate' or 'status'"
-        )
-    };
-} catch (\Exception $e) {
-    echo "❌ Error: {$e->getMessage()}\n";
-    exit(1);
-}
-
-function generateMigration(EntityManager $em, ?string $entityClass): void
-{
-    echo "🔍 Generating migration...\n\n";
-    
-    if ($entityClass) {
-        $sql = $em->generateMigration($entityClass);
-        if (empty($sql)) {
-            echo "✅ No migration needed.\n";
-            return;
-        }
-        echo "📄 Migration SQL:\n" . $sql . "\n";
-    } else {
-        // Generate for all entities
-        $entities = [/* your entity classes */];
-        $sql = $em->generateMigrations($entities);
-        if (!empty($sql)) {
-            $manager = $em->getMigrationManager();
-            $migrationName = $manager->generateMigrationName();
-            $filename = __DIR__ . '/../migrations/' . $migrationName . '.sql';
-            file_put_contents($filename, $sql);
-            echo "💾 Migration saved: {$filename}\n";
-        }
-    }
-}
-
-function executeMigrations(EntityManager $em): void
-{
-    $migrationsPath = __DIR__ . '/../migrations';
-    $files = glob($migrationsPath . '/*.sql');
-    $manager = $em->getMigrationManager();
-    $runner = $em->getMigrationRunner();
-    $executed = $manager->getExecutedMigrations();
-    
-    foreach ($files as $file) {
-        $migrationName = basename($file, '.sql');
-        if (!in_array($migrationName, $executed)) {
-            echo "▶️  Executing {$migrationName}...\n";
-            $sql = file_get_contents($file);
-            $runner->run($sql);
-            $manager->markAsExecuted($migrationName);
-            echo "✅ Migration applied.\n";
-        }
-    }
-}
-
-function showStatus(EntityManager $em): void
-{
-    $manager = $em->getMigrationManager();
-    $executed = $manager->getExecutedMigrations();
-    
-    echo "📊 Applied migrations: " . count($executed) . "\n";
-    foreach ($executed as $migration) {
-        echo "  ✅ {$migration}\n";
-    }
-}
+// Cache is automatically invalidated on entity updates
 ```
 
-**Make the script executable**:
-```bash
-chmod +x bin/migrate.php
-```
+#### Batch Operations
 
-**Usage**:
-```bash
-php bin/migrate.php generate          # Generates a migration
-php bin/migrate.php generate App\Entity\User  # For a specific entity
-php bin/migrate.php migrate            # Executes migrations
-php bin/migrate.php status             # Shows status
-```
-
-> **Note**: `symfony/console` is optional and suggested only if you want to create more structured CLI commands with argument validation, options, etc. For simple usage, a native PHP script is sufficient.
-
-### EntityManager Methods
-
-#### `persist(object $entity): void`
-
-Marks an entity for persistence.
+Insert multiple entities efficiently:
 
 ```php
+$users = [];
+for ($i = 1; $i <= 1000; $i++) {
+    $user = new User();
+    $user->email = "user{$i}@example.com";
+    $users[] = $user;
+}
+
+// Single INSERT query with multiple VALUES
+$em->persistBatch($users);
+$em->flush();
+```
+
+#### N+1 Query Optimization
+
+Eager loading with batch loading prevents N+1 queries:
+
+```php
+// Before: 1 query + N queries (N+1 problem)
+// After: 1 query + 1 query (optimized)
+$users = $repository->findAllWith(['posts']);
+```
+
+#### Automatic Indexes
+
+Foreign key columns automatically get indexes for optimal join performance.
+
+---
+
+### Query Logging
+
+Log all SQL queries for debugging and performance analysis:
+
+```php
+// Enable query logging
+$logger = $em->enableQueryLog(
+    enabled: true,
+    logFile: 'queries.log',  // Optional: log to file
+    logToConsole: true       // Optional: log to console
+);
+
+// Execute queries
 $user = new User();
-$user->email = 'test@example.com';
 $em->persist($user);
+$em->flush();
+
+// View logs
+$logs = $logger->getLogs();
+foreach ($logs as $log) {
+    echo $log['sql'] . ' (' . ($log['time'] * 1000) . 'ms)' . PHP_EOL;
+    echo 'Params: ' . json_encode($log['params']) . PHP_EOL;
+}
+
+// Get statistics
+echo "Total queries: " . $logger->count() . PHP_EOL;
+echo "Total time: " . ($logger->getTotalTime() * 1000) . "ms" . PHP_EOL;
+
+// Clear logs
+$logger->clear();
+
+// Disable logging
+$em->disableQueryLog();
 ```
 
-#### `flush(): void`
+---
 
-Executes all pending operations (INSERT, UPDATE, DELETE).
+### API Reference
 
-```php
-$em->persist($user);
-$em->flush(); // Executes INSERT
-```
+#### EntityManager Methods
 
-#### `remove(object $entity): void`
+| Method | Description |
+|--------|-------------|
+| `persist(object $entity): void` | Mark entity for persistence |
+| `persistBatch(array $entities): void` | Mark multiple entities for batch insert |
+| `flush(): void` | Execute pending operations |
+| `remove(object $entity): void` | Mark entity for deletion |
+| `find(string $entityClass, int\|string $id): ?object` | Find entity by ID |
+| `getRepository(string $entityClass): EntityRepository` | Get entity repository |
+| `createRepository(string $repositoryClass, string $entityClass): EntityRepository` | Create custom repository |
+| `transaction(callable $callback): mixed` | Execute in transaction with auto rollback |
+| `beginTransaction(): void` | Start transaction |
+| `commit(): void` | Commit transaction |
+| `rollback(): void` | Rollback transaction |
+| `enableQueryLog(bool $enabled, ?string $logFile, bool $logToConsole): QueryLoggerInterface` | Enable query logging |
+| `disableQueryLog(): void` | Disable query logging |
+| `getQueryLogger(): ?QueryLoggerInterface` | Get query logger |
+| `generateMigration(string $entityClass): string` | Generate migration SQL |
+| `generateMigrations(array $entityClasses): string` | Generate migrations for multiple entities |
 
-Marks an entity for deletion.
+#### EntityRepository Methods
 
-```php
-$em->remove($user);
-$em->flush(); // Executes DELETE
-```
+| Method | Description |
+|--------|-------------|
+| `find(int\|string $id): ?object` | Find entity by ID |
+| `findOrFail(int\|string $id): object` | Find entity by ID or throw exception |
+| `findAll(bool $useCache, ?int $cacheTtl): array` | Find all entities |
+| `findBy(array $criteria, ?array $orderBy, ?int $limit, ?int $offset, bool $useCache, ?int $cacheTtl): array` | Find entities by criteria |
+| `findOneBy(array $criteria): ?object` | Find one entity by criteria |
+| `findOneByOrFail(array $criteria): object` | Find one entity or throw exception |
+| `findAllWith(array $relations): array` | Find all with eager-loaded relations (optimized) |
 
-#### `find(string $entityClass, int|string $id): ?object`
+---
 
-Finds an entity by its ID.
+## 🎯 Best Practices
 
-```php
-$user = $em->find(User::class, 1);
-```
+### Performance
 
-#### `getRepository(string $entityClass): EntityRepository`
+1. **Use batch operations** for multiple inserts:
+   ```php
+   $em->persistBatch($entities); // Instead of loop with persist()
+   ```
 
-Returns the repository of an entity.
+2. **Use eager loading** to avoid N+1 queries:
+   ```php
+   $users = $repository->findAllWith(['posts']); // Optimized
+   ```
 
-```php
-$userRepo = $em->getRepository(User::class);
-$users = $userRepo->findAll();
-```
+3. **Enable query cache** for frequently accessed data:
+   ```php
+   $users = $repository->findAll(true, 3600);
+   ```
 
-#### `createRepository(string $repositoryClass, string $entityClass): EntityRepository`
+4. **Use transactions** for multiple operations:
+   ```php
+   $em->transaction(function($em) { /* ... */ });
+   ```
 
-Creates a custom repository with shared MetadataReader (recommended for performance).
+### Code Quality
 
-```php
-$userRepo = $em->createRepository(UserRepository::class, User::class);
-$activeUsers = $userRepo->findActiveUsers();
-```
+1. **Use `findOrFail()`** instead of checking for null:
+   ```php
+   $user = $repository->findOrFail(1); // Throws exception if not found
+   ```
 
-#### `getConnection(): Connection`
+2. **Use custom repositories** for complex queries:
+   ```php
+   $userRepo = $em->createRepository(UserRepository::class, User::class);
+   ```
 
-Returns the database connection.
+3. **Enable query logging** during development:
+   ```php
+   $em->enableQueryLog(true, 'queries.log', true);
+   ```
 
-```php
-$connection = $em->getConnection();
-$rows = $connection->fetchAll('SELECT * FROM users');
-```
+---
 
-#### `getMetadataReader(): MetadataReader`
+## 🔗 Integration Examples
 
-Returns the MetadataReader (shared among all repositories).
-
-```php
-$metadataReader = $em->getMetadataReader();
-$metadata = $metadataReader->getMetadata(User::class);
-```
-
-#### `beginTransaction(): void`
-
-Starts a transaction.
-
-```php
-$em->beginTransaction();
-```
-
-#### `commit(): void`
-
-Commits a transaction.
-
-```php
-$em->commit();
-```
-
-#### `rollback(): void`
-
-Rolls back a transaction.
-
-```php
-$em->rollback();
-```
-
-#### `generateMigration(string $entityClass): string`
-
-Generates a SQL migration for an entity.
-
-```php
-$sql = $em->generateMigration(User::class);
-```
-
-#### `generateMigrations(array $entityClasses): string`
-
-Generates SQL migrations for multiple entities.
-
-```php
-$sql = $em->generateMigrations([User::class, Post::class]);
-```
-
-#### `getMigrationManager(): MigrationManager`
-
-Returns the migration manager.
-
-```php
-$manager = $em->getMigrationManager();
-$migrationName = $manager->generateMigrationName();
-$executed = $manager->getExecutedMigrations();
-```
-
-#### `getMigrationRunner(): MigrationRunner`
-
-Returns the migration runner.
-
-```php
-$runner = $em->getMigrationRunner();
-$runner->run($sql);
-```
-
-## 🔗 Integration with Other Packages
-
-### Integration with core-php
+### With Symfony/Laravel-style Framework
 
 ```php
 <?php
 
-use JulienLinard\Core\Application;
 use JulienLinard\Doctrine\EntityManager;
-use JulienLinard\Core\Controller\Controller;
-use JulienLinard\Router\Attributes\Route;
-use JulienLinard\Router\Response;
 
-// Initialize the application
-$app = Application::create(__DIR__);
-$app->loadEnv();
-
-// Configure EntityManager
-$em = new EntityManager([
-    'host' => $_ENV['DB_HOST'],
-    'dbname' => $_ENV['DB_NAME'],
-    'user' => $_ENV['DB_USER'],
-    'password' => $_ENV['DB_PASS']
-]);
-
-// Use in a controller
-class UserController extends Controller
+class UserController
 {
     public function __construct(
         private EntityManager $em
     ) {}
     
-    #[Route(path: '/users/{id}', methods: ['GET'], name: 'user.show')]
-    public function show(int $id): Response
+    public function show(int $id)
     {
-        $user = $this->em->getRepository(User::class)->find($id);
-        
-        if (!$user) {
-            return $this->json(['error' => 'User not found'], 404);
-        }
-        
-        return $this->view('user/show', ['user' => $user]);
+        $user = $this->em->getRepository(User::class)->findOrFail($id);
+        return ['user' => $user];
+    }
+    
+    public function store(array $data)
+    {
+        return $this->em->transaction(function($em) use ($data) {
+            $user = new User();
+            $user->email = $data['email'];
+            $user->name = $data['name'];
+            $em->persist($user);
+            $em->flush();
+            return $user;
+        });
     }
 }
 ```
 
-### Integration with auth-php
-
-```php
-<?php
-
-use JulienLinard\Doctrine\EntityManager;
-use JulienLinard\Doctrine\Mapping\Entity;
-use JulienLinard\Doctrine\Mapping\Column;
-use JulienLinard\Doctrine\Mapping\Id;
-use JulienLinard\Auth\Models\UserInterface;
-use JulienLinard\Auth\Models\Authenticatable;
-
-// Define the User entity for auth-php
-#[Entity(table: 'users')]
-class User implements UserInterface
-{
-    use Authenticatable;
-    
-    #[Id]
-    #[Column(type: 'integer', autoIncrement: true)]
-    public ?int $id = null;
-    
-    #[Column(type: 'string', length: 255)]
-    public string $email;
-    
-    #[Column(type: 'string', length: 255)]
-    public string $password;
-    
-    // ... other properties
-}
-
-// Use with AuthManager
-$em = new EntityManager($dbConfig);
-$auth = new AuthManager([
-    'user_class' => User::class,
-    'entity_manager' => $em
-]);
-```
-
-### Standalone Usage
-
-`doctrine-php` can be used independently of all other packages.
-
-```php
-<?php
-
-require_once __DIR__ . '/vendor/autoload.php';
-
-use JulienLinard\Doctrine\EntityManager;
-use JulienLinard\Doctrine\Mapping\Entity;
-use JulienLinard\Doctrine\Mapping\Column;
-use JulienLinard\Doctrine\Mapping\Id;
-
-#[Entity(table: 'products')]
-class Product
-{
-    #[Id]
-    #[Column(type: 'integer', autoIncrement: true)]
-    public ?int $id = null;
-    
-    #[Column(type: 'string', length: 255)]
-    public string $name;
-    
-    #[Column(type: 'decimal', precision: 10, scale: 2)]
-    public float $price;
-}
-
-// Standalone usage
-$em = new EntityManager([
-    'host' => 'localhost',
-    'dbname' => 'mydb',
-    'user' => 'root',
-    'password' => 'password'
-]);
-
-$product = new Product();
-$product->name = 'Laptop';
-$product->price = 999.99;
-$em->persist($product);
-$em->flush();
-```
-
-## 📚 API Reference
-
-### EntityRepository
-
-#### `find(int|string $id): ?object`
-
-Finds an entity by its ID.
-
-```php
-$user = $repository->find(1);
-```
-
-#### `findAll(): array`
-
-Finds all entities.
-
-```php
-$users = $repository->findAll();
-```
-
-#### `findBy(array $criteria, ?array $orderBy = null, ?int $limit = null, ?int $offset = null): array`
-
-Finds entities by criteria.
-
-```php
-$users = $repository->findBy(['is_active' => true], ['created_at' => 'DESC'], 10, 0);
-```
-
-#### `findOneBy(array $criteria): ?object`
-
-Finds an entity by criteria.
-
-```php
-$user = $repository->findOneBy(['email' => 'test@example.com']);
-```
+---
 
 ## 📝 License
 
-MIT License - See the LICENSE file for more details.
+MIT License - See the [LICENSE](LICENSE) file for details.
 
 ## 🤝 Contributing
 
-Contributions are welcome! Feel free to open an issue or a pull request.
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-## 💝 Support the project
+## 💝 Support
 
-If this bundle is useful to you, consider [becoming a sponsor](https://github.com/sponsors/julien-lin) to support the development and maintenance of this open source project.
+If this package is useful to you, consider [becoming a sponsor](https://github.com/sponsors/julien-lin) to support development.
 
 ---
 
