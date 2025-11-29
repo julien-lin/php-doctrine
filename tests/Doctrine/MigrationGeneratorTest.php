@@ -152,6 +152,17 @@ class MigrationGeneratorTest extends TestCase
         // Vérifier que les longueurs sont spécifiées pour les VARCHAR
         $this->assertStringContainsString('VARCHAR(255)', $sql);
     }
+    
+    public function testGenerateWithAutomaticForeignKeyIndex(): void
+    {
+        // Utiliser TestPostWithRelations qui a une relation ManyToOne
+        $sql = $this->em->generateMigration(\JulienLinard\Doctrine\Tests\Fixtures\TestPostWithRelations::class);
+        
+        // Vérifier qu'un index automatique est créé sur la colonne de jointure (user_id)
+        $this->assertStringContainsString('INDEX', $sql);
+        $this->assertStringContainsString('idx_test_posts_user_id', $sql);
+        $this->assertStringContainsString('user_id', $sql);
+    }
 }
 
 #[Entity(table: 'test_migration_entities')]
