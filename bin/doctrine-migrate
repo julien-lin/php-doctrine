@@ -103,10 +103,12 @@ try {
         'generate' => generateMigration($em, $entityClass),
         'migrate' => executeMigrations($em),
         'rollback' => rollbackMigrations($em, $options['steps'] ?? null),
+        'create' => createDatabase($config),
+        'drop' => dropDatabase($config),
         'status' => showStatus($em),
         'help' => showHelp(),
         default => throw new \InvalidArgumentException(
-            "Action inconnue : {$action}. Utilisez 'generate', 'migrate', 'rollback', 'status' ou 'help'"
+            "Action inconnue : {$action}. Utilisez 'generate', 'migrate', 'rollback', 'create', 'drop', 'status' ou 'help'"
         )
     };
 } catch (\Exception $e) {
@@ -740,6 +742,157 @@ function isEntity(string $className): bool
 }
 
 /**
+ * Crée la base de données
+ */
+function createDatabase(array $config): void
+{
+    $dbName = $config['dbname'] ?? $config['database'] ?? null;
+    
+    if (empty($dbName)) {
+        echo "❌ Erreur : Le nom de la base de données n'est pas défini dans la configuration.\n";
+        exit(1);
+    }
+    
+    echo "🔨 Création de la base de données '{$dbName}'...\n\n";
+    
+    // Créer une connexion sans spécifier la base de données
+    $driver = $config['driver'] ?? 'mysql';
+    $host = $config['host'] ?? 'localhost';
+    $port = $config['port'] ?? null;
+    $user = $config['user'] ?? $config['username'] ?? 'root';
+    $password = $config['password'] ?? '';
+    $charset = $config['charset'] ?? 'utf8mb4';
+    
+    try {
+        // Se connecter sans base de données
+        if ($driver === 'mysql') {
+            $dsn = sprintf(
+                'mysql:host=%s%s;charset=%s',
+                $host,
+                $port ? ';port=' . $port : '',
+                $charset
+            );
+        } elseif ($driver === 'pgsql') {
+            $dsn = sprintf(
+                'pgsql:host=%s%s',
+                $host,
+                $port ? ';port=' . $port : ''
+            );
+        } else {
+            echo "❌ Erreur : Le driver '{$driver}' n'est pas supporté pour la création de base de données.\n";
+            exit(1);
+        }
+        
+        $pdo = new \PDO($dsn, $user, $password, [
+            \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+        ]);
+        
+        // Échapper le nom de la base de données
+        $dbNameEscaped = '`' . str_replace('`', '``', $dbName) . '`';
+        
+        // Créer la base de données
+        if ($driver === 'mysql') {
+            $sql = "CREATE DATABASE IF NOT EXISTS {$dbNameEscaped} CHARACTER SET {$charset} COLLATE {$charset}_unicode_ci";
+        } else {
+            $sql = "CREATE DATABASE {$dbNameEscaped}";
+        }
+        
+        $pdo->exec($sql);
+        echo "✅ Base de données '{$dbName}' créée avec succès.\n";
+        
+    } catch (\PDOException $e) {
+        if (strpos($e->getMessage(), 'already exists') !== false || 
+            strpos($e->getMessage(), 'Duplicate') !== false) {
+            echo "⚠️  La base de données '{$dbName}' existe déjà.\n";
+        } else {
+            echo "❌ Erreur lors de la création de la base de données : {$e->getMessage()}\n";
+            exit(1);
+        }
+    }
+}
+
+/**
+ * Supprime la base de données
+ */
+function dropDatabase(array $config): void
+{
+    $dbName = $config['dbname'] ?? $config['database'] ?? null;
+    
+    if (empty($dbName)) {
+        echo "❌ Erreur : Le nom de la base de données n'est pas défini dans la configuration.\n";
+        exit(1);
+    }
+    
+    echo "⚠️  ATTENTION : Vous êtes sur le point de supprimer la base de données '{$dbName}'.\n";
+    echo "Cette action est irréversible et supprimera toutes les données.\n\n";
+    
+    // Demander confirmation
+    echo "Voulez-vous continuer ? (tapez 'yes' pour confirmer) : ";
+    $handle = fopen("php://stdin", "r");
+    $line = fgets($handle);
+    $confirmation = trim($line);
+    fclose($handle);
+    
+    if (strtolower($confirmation) !== 'yes') {
+        echo "❌ Opération annulée.\n";
+        exit(0);
+    }
+    
+    echo "\n🗑️  Suppression de la base de données '{$dbName}'...\n\n";
+    
+    // Créer une connexion sans spécifier la base de données
+    $driver = $config['driver'] ?? 'mysql';
+    $host = $config['host'] ?? 'localhost';
+    $port = $config['port'] ?? null;
+    $user = $config['user'] ?? $config['username'] ?? 'root';
+    $password = $config['password'] ?? '';
+    $charset = $config['charset'] ?? 'utf8mb4';
+    
+    try {
+        // Se connecter sans base de données
+        if ($driver === 'mysql') {
+            $dsn = sprintf(
+                'mysql:host=%s%s;charset=%s',
+                $host,
+                $port ? ';port=' . $port : '',
+                $charset
+            );
+        } elseif ($driver === 'pgsql') {
+            $dsn = sprintf(
+                'pgsql:host=%s%s',
+                $host,
+                $port ? ';port=' . $port : ''
+            );
+        } else {
+            echo "❌ Erreur : Le driver '{$driver}' n'est pas supporté pour la suppression de base de données.\n";
+            exit(1);
+        }
+        
+        $pdo = new \PDO($dsn, $user, $password, [
+            \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+        ]);
+        
+        // Échapper le nom de la base de données
+        $dbNameEscaped = '`' . str_replace('`', '``', $dbName) . '`';
+        
+        // Supprimer la base de données
+        $sql = "DROP DATABASE IF EXISTS {$dbNameEscaped}";
+        $pdo->exec($sql);
+        
+        echo "✅ Base de données '{$dbName}' supprimée avec succès.\n";
+        
+    } catch (\PDOException $e) {
+        if (strpos($e->getMessage(), "doesn't exist") !== false || 
+            strpos($e->getMessage(), 'Unknown database') !== false) {
+            echo "⚠️  La base de données '{$dbName}' n'existe pas.\n";
+        } else {
+            echo "❌ Erreur lors de la suppression de la base de données : {$e->getMessage()}\n";
+            exit(1);
+        }
+    }
+}
+
+/**
  * Affiche l'aide
  */
 function showHelp(): void
@@ -750,16 +903,20 @@ function showHelp(): void
     echo "  php bin/doctrine-migrate [command] [options]\n\n";
     echo "Commandes disponibles:\n";
     echo "  generate [EntityClass]  Génère une migration pour une entité ou toutes les entités\n";
-    echo "  migrate                Exécute les migrations en attente\n";
-    echo "  rollback [--steps=N]   Annule les migrations (dernière par défaut, ou N migrations)\n";
-    echo "  status                 Affiche le statut des migrations\n";
-    echo "  help                   Affiche cette aide\n\n";
+    echo "  migrate                 Exécute les migrations en attente\n";
+    echo "  rollback [--steps=N]    Annule les migrations (dernière par défaut, ou N migrations)\n";
+    echo "  create                  Crée la base de données\n";
+    echo "  drop                    Supprime la base de données (demande confirmation)\n";
+    echo "  status                  Affiche le statut des migrations\n";
+    echo "  help                    Affiche cette aide\n\n";
     echo "Exemples:\n";
     echo "  php bin/doctrine-migrate generate\n";
     echo "  php bin/doctrine-migrate generate App\\Entity\\User\n";
     echo "  php bin/doctrine-migrate migrate\n";
     echo "  php bin/doctrine-migrate rollback\n";
     echo "  php bin/doctrine-migrate rollback --steps=3\n";
+    echo "  php bin/doctrine-migrate create\n";
+    echo "  php bin/doctrine-migrate drop\n";
     echo "  php bin/doctrine-migrate status\n\n";
     echo "Configuration:\n";
     echo "  Le script cherche la config dans:\n";

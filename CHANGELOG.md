@@ -5,6 +5,15 @@ Tous les changements notables de ce projet seront documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2025-11-29
+
+### Ajouté
+- **Nouvelles commandes CLI** : `create` et `drop` pour gérer la base de données
+  - `composer migrate:create` : Crée la base de données si elle n'existe pas
+  - `composer migrate:drop` : Supprime la base de données (avec confirmation)
+  - Support MySQL/MariaDB et PostgreSQL
+  - Gestion des erreurs et messages informatifs
+
 ## [1.1.3] - 2025-11-29
 
 ### Corrigé
