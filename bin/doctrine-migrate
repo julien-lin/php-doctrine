@@ -71,7 +71,10 @@ if ($config === null) {
     echo "  1. Variable d'environnement DOCTRINE_CONFIG (chemin vers fichier PHP)\n";
     echo "  2. config/database.php\n";
     echo "  3. ../config/database.php\n";
-    echo "  4. Variables d'environnement DB_HOST, DB_NAME, DB_USER, DB_PASSWORD\n";
+    echo "  4. www/config/database.php\n";
+    echo "  5. src/config/database.php\n";
+    echo "  6. Variables d'environnement DB_HOST, DB_NAME, DB_USER, DB_PASSWORD\n";
+    echo "\nRépertoire courant : " . getcwd() . "\n";
     echo "\nCréez un fichier config/database.php avec:\n";
     echo "<?php\n";
     echo "return [\n";
@@ -129,6 +132,29 @@ function isDDLStatement(string $sql): bool
 }
 
 /**
+ * Trouve le dossier migrations dans différents emplacements possibles
+ */
+function findMigrationsPath(): string
+{
+    $currentDir = getcwd();
+    $searchPaths = [
+        $currentDir . '/migrations',
+        $currentDir . '/www/migrations',
+        $currentDir . '/src/migrations',
+        $currentDir . '/../migrations',
+    ];
+    
+    foreach ($searchPaths as $path) {
+        if (is_dir($path)) {
+            return $path;
+        }
+    }
+    
+    // Par défaut, utiliser migrations dans le répertoire courant
+    return $currentDir . '/migrations';
+}
+
+/**
  * Charge la configuration de la base de données
  */
 function loadDatabaseConfig(): ?array
@@ -141,26 +167,28 @@ function loadDatabaseConfig(): ?array
         }
     }
     
-    // 2. config/database.php depuis le répertoire courant
     $currentDir = getcwd();
-    $configPath = $currentDir . '/config/database.php';
-    if (file_exists($configPath)) {
-        $config = require $configPath;
-        if (is_array($config)) {
-            return $config;
+    $searchPaths = [
+        // 2. config/database.php depuis le répertoire courant
+        $currentDir . '/config/database.php',
+        // 3. ../config/database.php depuis le répertoire courant
+        $currentDir . '/../config/database.php',
+        // 4. www/config/database.php (structure skeleton)
+        $currentDir . '/www/config/database.php',
+        // 5. src/config/database.php (autre structure possible)
+        $currentDir . '/src/config/database.php',
+    ];
+    
+    foreach ($searchPaths as $configPath) {
+        if (file_exists($configPath)) {
+            $config = require $configPath;
+            if (is_array($config)) {
+                return $config;
+            }
         }
     }
     
-    // 3. ../config/database.php depuis le répertoire courant
-    $configPath = $currentDir . '/../config/database.php';
-    if (file_exists($configPath)) {
-        $config = require $configPath;
-        if (is_array($config)) {
-            return $config;
-        }
-    }
-    
-    // 4. Variables d'environnement DB_*
+    // 6. Variables d'environnement DB_*
     $dbHost = getenv('DB_HOST');
     $dbName = getenv('DB_NAME') ?: getenv('DB_DATABASE');
     $dbUser = getenv('DB_USER') ?: getenv('DB_USERNAME');
@@ -209,7 +237,7 @@ function generateMigration(EntityManager $em, ?string $entityClass): void
         // Proposer de sauvegarder
         $manager = $em->getMigrationManager();
         $migrationName = $manager->generateMigrationName();
-        $migrationsPath = getcwd() . '/migrations';
+        $migrationsPath = findMigrationsPath();
         
         if (!is_dir($migrationsPath)) {
             mkdir($migrationsPath, 0755, true);
@@ -249,7 +277,7 @@ function generateMigration(EntityManager $em, ?string $entityClass): void
         // Sauvegarder dans un fichier
         $manager = $em->getMigrationManager();
         $migrationName = $manager->generateMigrationName();
-        $migrationsPath = getcwd() . '/migrations';
+        $migrationsPath = findMigrationsPath();
         
         if (!is_dir($migrationsPath)) {
             mkdir($migrationsPath, 0755, true);
@@ -269,7 +297,7 @@ function executeMigrations(EntityManager $em): void
 {
     echo "🔍 Recherche des migrations...\n\n";
     
-    $migrationsPath = getcwd() . '/migrations';
+    $migrationsPath = findMigrationsPath();
     
     if (!is_dir($migrationsPath)) {
         echo "⚠️  Le dossier migrations n'existe pas. Création...\n";
@@ -360,7 +388,7 @@ function rollbackMigrations(EntityManager $em, ?int $steps = null): void
         echo "📋 Annulation de la dernière migration...\n\n";
     }
     
-    $migrationsPath = getcwd() . '/migrations';
+    $migrationsPath = findMigrationsPath();
     
     foreach ($migrationsToRollback as $migrationName) {
         echo "⏪ Annulation de {$migrationName}...\n";
@@ -463,7 +491,7 @@ function rollbackMigrations(EntityManager $em, ?int $steps = null): void
  */
 function loadMigrationClass(string $migrationName): ?object
 {
-    $migrationsPath = getcwd() . '/migrations';
+    $migrationsPath = findMigrationsPath();
     $classFile = $migrationsPath . '/' . $migrationName . '.php';
     
     if (!file_exists($classFile)) {
@@ -525,7 +553,7 @@ function showStatus(EntityManager $em): void
     echo "📊 Statut des migrations\n";
     echo str_repeat("=", 60) . "\n\n";
     
-    $migrationsPath = getcwd() . '/migrations';
+    $migrationsPath = findMigrationsPath();
     $files = glob($migrationsPath . '/*.sql');
     $manager = $em->getMigrationManager();
     $executed = $manager->getExecutedMigrations();

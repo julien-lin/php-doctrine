@@ -143,15 +143,15 @@ class Connection
             
             if ($hasNamedParams) {
                 // Paramètres nommés (ex: ['param' => value] pour ':param')
-                foreach ($params as $key => $value) {
-                    $placeholder = ':' . $key;
-                    $type = match (true) {
-                        is_int($value) => PDO::PARAM_INT,
-                        is_bool($value) => PDO::PARAM_BOOL,
-                        is_null($value) => PDO::PARAM_NULL,
-                        default => PDO::PARAM_STR,
-                    };
-                    $stmt->bindValue($placeholder, $value, $type);
+            foreach ($params as $key => $value) {
+                $placeholder = ':' . $key;
+                $type = match (true) {
+                    is_int($value) => PDO::PARAM_INT,
+                    is_bool($value) => PDO::PARAM_BOOL,
+                    is_null($value) => PDO::PARAM_NULL,
+                    default => PDO::PARAM_STR,
+                };
+                $stmt->bindValue($placeholder, $value, $type);
                 }
             } else {
                 // Paramètres positionnels (ex: [value1, value2] pour '?')
