@@ -1157,6 +1157,40 @@ class EntityManager
     }
 
     /**
+     * Exécute une fonction dans une transaction avec gestion automatique du commit/rollback
+     * 
+     * Cette méthode simplifie l'utilisation des transactions en gérant automatiquement
+     * le commit en cas de succès et le rollback en cas d'exception.
+     * 
+     * @param callable $callback Fonction à exécuter dans la transaction
+     * @return mixed Valeur retournée par le callback
+     * @throws \Throwable Toute exception levée par le callback
+     * 
+     * @example
+     * ```php
+     * $em->transaction(function() use ($em) {
+     *     $user = new User();
+     *     $em->persist($user);
+     *     $em->flush();
+     *     return $user;
+     * });
+     * ```
+     */
+    public function transaction(callable $callback): mixed
+    {
+        $this->beginTransaction();
+        
+        try {
+            $result = $callback($this);
+            $this->commit();
+            return $result;
+        } catch (\Throwable $e) {
+            $this->rollback();
+            throw $e;
+        }
+    }
+
+    /**
      * Active le logging des requêtes SQL
      * 
      * @param bool $enabled Activer le logging
