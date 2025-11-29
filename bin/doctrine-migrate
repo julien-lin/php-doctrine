@@ -41,6 +41,9 @@ require_once $autoloadPath;
 
 use JulienLinard\Doctrine\EntityManager;
 
+// Charger le fichier .env si disponible (optionnel)
+loadEnvFile();
+
 // Récupérer l'action depuis les arguments CLI
 $action = $argv[1] ?? 'status';
 $entityClass = null;
@@ -109,6 +112,81 @@ try {
 } catch (\Exception $e) {
     echo "❌ Erreur : {$e->getMessage()}\n";
     exit(1);
+}
+
+/**
+ * Charge le fichier .env si disponible (optionnel)
+ */
+function loadEnvFile(): void
+{
+    $currentDir = getcwd();
+    $envPaths = [
+        $currentDir . '/.env',
+        $currentDir . '/www/.env',
+        $currentDir . '/src/.env',
+        $currentDir . '/../.env',
+    ];
+    
+    foreach ($envPaths as $envPath) {
+        if (file_exists($envPath)) {
+            // Essayer de charger avec php-dotenv si disponible
+            if (class_exists('JulienLinard\Dotenv\Dotenv')) {
+                try {
+                    \JulienLinard\Dotenv\Dotenv::createImmutable(dirname($envPath), basename($envPath))->load();
+                    return;
+                } catch (\Exception $e) {
+                    // Ignorer les erreurs de chargement .env
+                }
+            }
+            // Fallback : parser manuellement le .env (basique)
+            parseEnvFile($envPath);
+            return;
+        }
+    }
+}
+
+/**
+ * Parse basique d'un fichier .env (fallback si php-dotenv n'est pas disponible)
+ */
+function parseEnvFile(string $filePath): void
+{
+    if (!file_exists($filePath) || !is_readable($filePath)) {
+        return;
+    }
+    
+    $lines = file($filePath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($lines === false) {
+        return;
+    }
+    
+    foreach ($lines as $line) {
+        $line = trim($line);
+        
+        // Ignorer les commentaires
+        if (strpos($line, '#') === 0) {
+            continue;
+        }
+        
+        // Parser KEY=VALUE
+        if (strpos($line, '=') !== false) {
+            [$key, $value] = explode('=', $line, 2);
+            $key = trim($key);
+            $value = trim($value);
+            
+            // Retirer les guillemets
+            if ((strpos($value, '"') === 0 && substr($value, -1) === '"') ||
+                (strpos($value, "'") === 0 && substr($value, -1) === "'")) {
+                $value = substr($value, 1, -1);
+            }
+            
+            // Définir la variable d'environnement si elle n'existe pas déjà
+            if (!isset($_ENV[$key]) && !isset($_SERVER[$key])) {
+                $_ENV[$key] = $value;
+                $_SERVER[$key] = $value;
+                putenv("$key=$value");
+            }
+        }
+    }
 }
 
 /**
