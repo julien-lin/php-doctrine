@@ -78,15 +78,33 @@ class MigrationGenerator
     {
         $sqlParts = [];
         
-        // Générer les migrations pour les tables principales
-        foreach ($entityClasses as $entityClass) {
-            $sql = $this->generateForEntity($entityClass);
-            if (!empty($sql)) {
-                $sqlParts[] = $sql;
+        // Trier les entités par ordre de dépendance (topological sort)
+        // Les entités sans dépendances sont créées en premier
+        $sortedEntities = $this->sortEntitiesByDependencies($entityClasses);
+        
+        // Générer les migrations pour les tables principales dans le bon ordre
+        foreach ($sortedEntities as $entityClass) {
+            $metadata = $this->metadataReader->getMetadata($entityClass);
+            $tableName = $metadata['table'];
+            
+            // Vérifier si la table existe
+            if (!$this->tableExists($tableName)) {
+                // Créer la table (sans les tables de jointure pour l'instant)
+                // Passer la liste des entités en cours de création et l'entité actuelle pour vérifier les FK
+                $tableSql = $this->generateCreateTableSQL($metadata, $sortedEntities, $entityClass);
+                if (!empty($tableSql)) {
+                    $sqlParts[] = $tableSql;
+                }
+            } else {
+                // Comparer et générer les ALTER TABLE
+                $alterSql = $this->generateAlterTableSQL($metadata);
+                if (!empty($alterSql)) {
+                    $sqlParts[] = $alterSql;
+                }
             }
         }
         
-        // Générer les tables de jointure pour les relations ManyToMany
+        // Générer les tables de jointure pour les relations ManyToMany (après toutes les tables principales)
         $joinTablesSql = $this->generateManyToManyJoinTables($entityClasses);
         if (!empty($joinTablesSql)) {
             $sqlParts[] = $joinTablesSql;
@@ -144,9 +162,11 @@ class MigrationGenerator
      * Génère le SQL pour créer une table
      * 
      * @param array $metadata Métadonnées de l'entité
+     * @param array|null $entitiesBeingCreated Liste des entités en cours de création (pour vérifier les FK)
+     * @param string|null $currentEntityClass Classe de l'entité actuelle (pour déterminer l'ordre)
      * @return string SQL CREATE TABLE
      */
-    private function generateCreateTableSQL(array $metadata): string
+    private function generateCreateTableSQL(array $metadata, ?array $entitiesBeingCreated = null, ?string $currentEntityClass = null): string
     {
         $tableName = $this->escapeIdentifier($metadata['table']);
         $columns = [];
@@ -211,18 +231,40 @@ class MigrationGenerator
                 // Récupérer les métadonnées de l'entité cible
                 try {
                     $targetMetadata = $this->metadataReader->getMetadata($relation['targetEntity']);
-                    $targetIdColumn = $targetMetadata['id'];
-                    $targetIdInfo = $targetMetadata['columns'][$targetIdColumn] ?? null;
-                    $targetIdName = $targetIdInfo['name'] ?? $targetIdColumn;
+                    $targetTableName = $targetMetadata['table'];
                     
-                    $fkNameEscaped = $this->escapeIdentifier('fk_' . $metadata['table'] . '_' . $fkColumn);
-                    $targetTableEscaped = $this->escapeIdentifier($targetMetadata['table']);
-                    $targetIdEscaped = $this->escapeIdentifier($targetIdName);
+                    // Vérifier si la table cible existe déjà OU si elle sera créée dans cette migration
+                    $targetTableExists = $this->tableExists($targetTableName);
+                    $targetWillBeCreated = false;
                     
-                    $foreignKeys[] = "CONSTRAINT {$fkNameEscaped} 
-                                     FOREIGN KEY ({$fkColumnEscaped}) 
-                                     REFERENCES {$targetTableEscaped} ({$targetIdEscaped}) 
-                                     ON DELETE CASCADE";
+                    if ($entitiesBeingCreated !== null && $currentEntityClass !== null) {
+                        // Vérifier si l'entité cible est dans la liste des entités à créer
+                        // et si elle sera créée avant l'entité actuelle (grâce au tri topologique)
+                        $currentIndex = array_search($currentEntityClass, $entitiesBeingCreated);
+                        $targetIndex = array_search($relation['targetEntity'], $entitiesBeingCreated);
+                        
+                        // Si la table cible sera créée avant la table actuelle, on peut créer la FK
+                        if ($targetIndex !== false && $currentIndex !== false && $targetIndex < $currentIndex) {
+                            $targetWillBeCreated = true;
+                        }
+                    }
+                    
+                    // Créer la FK seulement si la table cible existe déjà ou sera créée avant
+                    if ($targetTableExists || $targetWillBeCreated) {
+                        $targetIdColumn = $targetMetadata['id'];
+                        $targetIdInfo = $targetMetadata['columns'][$targetIdColumn] ?? null;
+                        $targetIdName = $targetIdInfo['name'] ?? $targetIdColumn;
+                        
+                        $fkNameEscaped = $this->escapeIdentifier('fk_' . $metadata['table'] . '_' . $fkColumn);
+                        $targetTableEscaped = $this->escapeIdentifier($targetTableName);
+                        $targetIdEscaped = $this->escapeIdentifier($targetIdName);
+                        
+                        $foreignKeys[] = "CONSTRAINT {$fkNameEscaped} 
+                                         FOREIGN KEY ({$fkColumnEscaped}) 
+                                         REFERENCES {$targetTableEscaped} ({$targetIdEscaped}) 
+                                         ON DELETE CASCADE";
+                    }
+                    // Sinon, on ne crée pas la FK maintenant (elle sera créée dans une migration ultérieure)
                 } catch (\Exception $e) {
                     // Si l'entité cible n'existe pas encore, on ne crée pas la FK
                     // Elle sera créée lors d'une migration ultérieure
@@ -694,6 +736,82 @@ class MigrationGenerator
         }
         
         return implode("\n\n", $joinTables);
+    }
+    
+    /**
+     * Trie les entités par ordre de dépendance (topological sort)
+     * Les entités sans dépendances sont placées en premier
+     * 
+     * @param array $entityClasses Tableau de classes d'entités
+     * @return array Tableau d'entités triées par ordre de dépendance
+     */
+    private function sortEntitiesByDependencies(array $entityClasses): array
+    {
+        // Construire le graphe de dépendances
+        $dependencies = []; // [entityClass => [dependencies...]]
+        $entityMap = []; // [entityClass => metadata]
+        
+        foreach ($entityClasses as $entityClass) {
+            $metadata = $this->metadataReader->getMetadata($entityClass);
+            $entityMap[$entityClass] = $metadata;
+            $dependencies[$entityClass] = [];
+            
+            // Analyser les relations ManyToOne pour trouver les dépendances
+            foreach ($metadata['relations'] ?? [] as $relation) {
+                if ($relation['type'] === 'ManyToOne') {
+                    $targetEntity = $relation['targetEntity'];
+                    
+                    // Si l'entité cible est dans la liste des entités à créer, c'est une dépendance
+                    if (in_array($targetEntity, $entityClasses, true)) {
+                        $dependencies[$entityClass][] = $targetEntity;
+                    }
+                }
+            }
+        }
+        
+        // Tri topologique (Kahn's algorithm)
+        $sorted = [];
+        $inDegree = []; // Nombre de dépendances sortantes pour chaque entité (combien d'entités elle dépend)
+        
+        // Initialiser le degré entrant (nombre de dépendances)
+        foreach ($entityClasses as $entityClass) {
+            $inDegree[$entityClass] = count($dependencies[$entityClass]);
+        }
+        
+        // Trouver les entités sans dépendances (peuvent être créées en premier)
+        $queue = [];
+        foreach ($inDegree as $entityClass => $degree) {
+            if ($degree === 0) {
+                $queue[] = $entityClass;
+            }
+        }
+        
+        // Traiter les entités dans l'ordre
+        while (!empty($queue)) {
+            $current = array_shift($queue);
+            $sorted[] = $current;
+            
+            // Réduire le degré des entités qui dépendent de celle-ci
+            // Si une entité B dépend de A, et qu'on vient de traiter A, alors B a une dépendance de moins
+            foreach ($dependencies as $entityClass => $deps) {
+                if (in_array($current, $deps, true)) {
+                    $inDegree[$entityClass]--;
+                    if ($inDegree[$entityClass] === 0) {
+                        $queue[] = $entityClass;
+                    }
+                }
+            }
+        }
+        
+        // Si toutes les entités n'ont pas été triées, il y a un cycle
+        // Dans ce cas, ajouter les entités restantes à la fin (ordre original)
+        foreach ($entityClasses as $entityClass) {
+            if (!in_array($entityClass, $sorted, true)) {
+                $sorted[] = $entityClass;
+            }
+        }
+        
+        return $sorted;
     }
 }
 

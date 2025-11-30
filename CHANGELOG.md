@@ -5,6 +5,23 @@ Tous les changements notables de ce projet seront documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.7] - 2025-11-30
+
+### Corrigé
+- **Ordre de création des tables dans les migrations** : Correction de l'ordre de création des tables pour respecter les contraintes de clés étrangères
+  - Tri topologique des entités par ordre de dépendance (algorithme de Kahn)
+  - Les entités sans dépendances sont créées en premier
+  - Les entités avec dépendances ManyToOne sont créées après leurs dépendances
+  - Les tables de jointure ManyToMany sont créées en dernier (après toutes les tables principales)
+  - Résout l'erreur "Foreign key constraint is incorrectly formed" lors de la création de migrations
+
+### Amélioré
+- **MigrationGenerator** : Amélioration de la gestion des contraintes de clés étrangères
+  - Vérification si la table cible existe déjà en base de données
+  - Vérification si la table cible sera créée avant la table actuelle (grâce au tri topologique)
+  - Les FK ne sont créées que si l'une de ces conditions est remplie
+  - Méthode `sortEntitiesByDependencies()` ajoutée pour trier les entités par ordre de dépendance
+
 ## [1.1.6] - 2025-11-30
 
 ### Ajouté
