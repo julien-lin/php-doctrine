@@ -42,14 +42,30 @@ class MigrationGenerator
         $metadata = $this->metadataReader->getMetadata($entityClass);
         $tableName = $metadata['table'];
         
+        $sqlParts = [];
+        
         // Vérifier si la table existe
         if (!$this->tableExists($tableName)) {
             // Créer la table
-            return $this->generateCreateTableSQL($metadata);
+            $tableSql = $this->generateCreateTableSQL($metadata);
+            if (!empty($tableSql)) {
+                $sqlParts[] = $tableSql;
+            }
         } else {
             // Comparer et générer les ALTER TABLE
-            return $this->generateAlterTableSQL($metadata);
+            $alterSql = $this->generateAlterTableSQL($metadata);
+            if (!empty($alterSql)) {
+                $sqlParts[] = $alterSql;
+            }
         }
+        
+        // Générer les tables de jointure pour les relations ManyToMany de cette entité
+        $joinTablesSql = $this->generateManyToManyJoinTables([$entityClass]);
+        if (!empty($joinTablesSql)) {
+            $sqlParts[] = $joinTablesSql;
+        }
+        
+        return implode("\n\n", $sqlParts);
     }
     
     /**
@@ -62,11 +78,18 @@ class MigrationGenerator
     {
         $sqlParts = [];
         
+        // Générer les migrations pour les tables principales
         foreach ($entityClasses as $entityClass) {
             $sql = $this->generateForEntity($entityClass);
             if (!empty($sql)) {
                 $sqlParts[] = $sql;
             }
+        }
+        
+        // Générer les tables de jointure pour les relations ManyToMany
+        $joinTablesSql = $this->generateManyToManyJoinTables($entityClasses);
+        if (!empty($joinTablesSql)) {
+            $sqlParts[] = $joinTablesSql;
         }
         
         return implode("\n\n", $sqlParts);
@@ -561,6 +584,116 @@ class MigrationGenerator
         // Échapper les backticks en les doublant
         $escaped = str_replace('`', '``', $identifier);
         return "`{$escaped}`";
+    }
+    
+    /**
+     * Génère les tables de jointure pour les relations ManyToMany
+     * 
+     * @param array $entityClasses Tableau de classes d'entités à analyser
+     * @return string SQL pour créer les tables de jointure
+     */
+    private function generateManyToManyJoinTables(array $entityClasses): string
+    {
+        $joinTables = [];
+        $processedJoinTables = []; // Pour éviter les doublons
+        
+        foreach ($entityClasses as $entityClass) {
+            $metadata = $this->metadataReader->getMetadata($entityClass);
+            
+            // Parcourir les relations ManyToMany
+            foreach ($metadata['relations'] ?? [] as $propertyName => $relation) {
+                if ($relation['type'] === 'ManyToMany') {
+                    $joinTableName = $relation['joinTable'];
+                    
+                    // Si pas de nom de table de jointure spécifié, générer un nom par défaut
+                    if (empty($joinTableName)) {
+                        $sourceTable = $metadata['table'];
+                        $targetMetadata = $this->metadataReader->getMetadata($relation['targetEntity']);
+                        $targetTable = $targetMetadata['table'];
+                        
+                        // Générer un nom de table de jointure (ordre alphabétique pour éviter les doublons)
+                        $tables = [$sourceTable, $targetTable];
+                        sort($tables);
+                        $joinTableName = $tables[0] . '_' . $tables[1];
+                    }
+                    
+                    // Éviter de traiter la même table de jointure deux fois
+                    if (isset($processedJoinTables[$joinTableName])) {
+                        continue;
+                    }
+                    
+                    // Vérifier si la table de jointure existe déjà
+                    if ($this->tableExists($joinTableName)) {
+                        continue;
+                    }
+                    
+                    // Récupérer les métadonnées de l'entité cible
+                    try {
+                        $targetMetadata = $this->metadataReader->getMetadata($relation['targetEntity']);
+                        
+                        // Déterminer les noms de colonnes
+                        $sourceTable = $metadata['table'];
+                        $targetTable = $targetMetadata['table'];
+                        
+                        // Extraire le nom de base (sans 's' final si pluriel)
+                        $sourceBase = rtrim($sourceTable, 's');
+                        if ($sourceBase === $sourceTable) {
+                            $sourceBase = $sourceTable;
+                        }
+                        
+                        $targetBase = rtrim($targetTable, 's');
+                        if ($targetBase === $targetTable) {
+                            $targetBase = $targetTable;
+                        }
+                        
+                        $sourceIdColumn = $sourceBase . '_id';
+                        $targetIdColumn = $targetBase . '_id';
+                        
+                        // Récupérer les colonnes ID des entités
+                        $sourceIdProperty = $metadata['id'];
+                        $sourceIdInfo = $metadata['columns'][$sourceIdProperty] ?? null;
+                        $sourceIdName = $sourceIdInfo['name'] ?? $sourceIdProperty;
+                        
+                        $targetIdProperty = $targetMetadata['id'];
+                        $targetIdInfo = $targetMetadata['columns'][$targetIdProperty] ?? null;
+                        $targetIdName = $targetIdInfo['name'] ?? $targetIdProperty;
+                        
+                        // Générer le SQL pour la table de jointure
+                        $joinTableEscaped = $this->escapeIdentifier($joinTableName);
+                        $sourceIdColumnEscaped = $this->escapeIdentifier($sourceIdColumn);
+                        $targetIdColumnEscaped = $this->escapeIdentifier($targetIdColumn);
+                        $sourceTableEscaped = $this->escapeIdentifier($sourceTable);
+                        $targetTableEscaped = $this->escapeIdentifier($targetTable);
+                        $sourceIdNameEscaped = $this->escapeIdentifier($sourceIdName);
+                        $targetIdNameEscaped = $this->escapeIdentifier($targetIdName);
+                        
+                        $sql = "CREATE TABLE IF NOT EXISTS {$joinTableEscaped} (\n";
+                        $sql .= "  {$sourceIdColumnEscaped} INT NOT NULL,\n";
+                        $sql .= "  {$targetIdColumnEscaped} INT NOT NULL,\n";
+                        $sql .= "  PRIMARY KEY ({$sourceIdColumnEscaped}, {$targetIdColumnEscaped}),\n";
+                        $sql .= "  INDEX {$this->escapeIdentifier('idx_' . $joinTableName . '_' . $sourceIdColumn)} ({$sourceIdColumnEscaped}),\n";
+                        $sql .= "  INDEX {$this->escapeIdentifier('idx_' . $joinTableName . '_' . $targetIdColumn)} ({$targetIdColumnEscaped}),\n";
+                        $sql .= "  CONSTRAINT {$this->escapeIdentifier('fk_' . $joinTableName . '_' . $sourceIdColumn)} \n";
+                        $sql .= "    FOREIGN KEY ({$sourceIdColumnEscaped}) \n";
+                        $sql .= "    REFERENCES {$sourceTableEscaped} ({$sourceIdNameEscaped}) \n";
+                        $sql .= "    ON DELETE CASCADE,\n";
+                        $sql .= "  CONSTRAINT {$this->escapeIdentifier('fk_' . $joinTableName . '_' . $targetIdColumn)} \n";
+                        $sql .= "    FOREIGN KEY ({$targetIdColumnEscaped}) \n";
+                        $sql .= "    REFERENCES {$targetTableEscaped} ({$targetIdNameEscaped}) \n";
+                        $sql .= "    ON DELETE CASCADE\n";
+                        $sql .= ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+                        
+                        $joinTables[] = $sql;
+                        $processedJoinTables[$joinTableName] = true;
+                    } catch (\Exception $e) {
+                        // Si l'entité cible n'existe pas encore, ignorer cette relation
+                        // Elle sera créée lors d'une migration ultérieure
+                    }
+                }
+            }
+        }
+        
+        return implode("\n\n", $joinTables);
     }
 }
 
