@@ -5,6 +5,23 @@ Tous les changements notables de ce projet seront documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.6] - 2025-11-30
+
+### Ajouté
+- **Génération automatique des tables de jointure ManyToMany** : Le système de migration génère maintenant automatiquement les tables de jointure pour les relations ManyToMany
+  - Détection automatique des relations ManyToMany dans les entités
+  - Génération de la table de jointure avec clé primaire composite, index et contraintes de clé étrangère
+  - Support du nom de table personnalisé via l'attribut `joinTable` dans `#[ManyToMany]`
+  - Génération automatique du nom de table si non spécifié (ordre alphabétique pour éviter les doublons)
+  - Vérification de l'existence de la table avant création pour éviter les erreurs
+  - Fonctionne avec `generateForEntity()` et `generateForEntities()`
+
+### Amélioré
+- **MigrationGenerator** : Amélioration de la génération de migrations pour inclure les tables de jointure ManyToMany
+  - Méthode `generateManyToManyJoinTables()` ajoutée pour générer automatiquement les tables de jointure
+  - Les tables de jointure sont générées après les tables principales
+  - Évite les doublons si plusieurs entités partagent la même relation
+
 ## [1.1.4] - 2025-11-29
 
 ### Ajouté
