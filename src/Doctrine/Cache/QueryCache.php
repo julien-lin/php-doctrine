@@ -14,9 +14,15 @@ class QueryCache
 {
     /**
      * Cache en mémoire (tableau associatif)
-     * Structure : ['cache_key' => ['data' => ..., 'expires_at' => timestamp]]
+     * Structure : ['cache_key' => ['data' => ..., 'expires_at' => timestamp, 'tags' => [...]]]
      */
     private array $cache = [];
+    
+    /**
+     * Index des tags pour invalidation granulaire
+     * Structure : ['entity_class:entity_id' => ['cache_key1', 'cache_key2', ...]]
+     */
+    private array $tagIndex = [];
     
     /**
      * TTL par défaut en secondes (1 heure)
@@ -63,6 +69,10 @@ class QueryCache
         
         // Vérifier si l'entrée a expiré
         if ($entry['expires_at'] < time()) {
+            // Supprimer les tags associés
+            if (isset($entry['tags'])) {
+                $this->removeKeyFromTags($key, $entry['tags']);
+            }
             unset($this->cache[$key]);
             return null;
         }
@@ -76,9 +86,10 @@ class QueryCache
      * @param string $key Clé du cache
      * @param mixed $value Valeur à stocker
      * @param int|null $ttl TTL en secondes (null = TTL par défaut)
+     * @param array $tags Tags pour invalidation granulaire (ex: ['User:1', 'User:*'])
      * @return void
      */
-    public function set(string $key, mixed $value, ?int $ttl = null): void
+    public function set(string $key, mixed $value, ?int $ttl = null, array $tags = []): void
     {
         if (!$this->enabled) {
             return;
@@ -87,10 +98,19 @@ class QueryCache
         $ttl = $ttl ?? $this->defaultTtl;
         $expiresAt = time() + $ttl;
         
+        // Supprimer les anciens tags de cette clé si elle existe déjà
+        if (isset($this->cache[$key]['tags'])) {
+            $this->removeKeyFromTags($key, $this->cache[$key]['tags']);
+        }
+        
         $this->cache[$key] = [
             'data' => $value,
             'expires_at' => $expiresAt,
+            'tags' => $tags,
         ];
+        
+        // Ajouter la clé aux index des tags
+        $this->addKeyToTags($key, $tags);
     }
     
     /**
@@ -101,6 +121,9 @@ class QueryCache
      */
     public function delete(string $key): void
     {
+        if (isset($this->cache[$key]['tags'])) {
+            $this->removeKeyFromTags($key, $this->cache[$key]['tags']);
+        }
         unset($this->cache[$key]);
     }
     
@@ -132,7 +155,16 @@ class QueryCache
         // Créer une clé unique
         $keyData = $normalizedSql . '|' . serialize($params);
         
-        return 'query_' . md5($keyData);
+        // Utiliser xxh3 si disponible (PHP 8.1+), sinon sha256 (plus sûr que MD5)
+        if (function_exists('hash') && in_array('xxh3', hash_algos(), true)) {
+            $hash = hash('xxh3', $keyData);
+        } else {
+            // Utiliser sha256 au lieu de MD5 pour des raisons de sécurité
+            $hash = hash('sha256', $keyData);
+        }
+        
+        // Utiliser les 16 premiers caractères pour garder une clé de taille raisonnable
+        return 'query_' . substr($hash, 0, 16);
     }
     
     /**
@@ -146,6 +178,10 @@ class QueryCache
         
         foreach ($this->cache as $key => $entry) {
             if ($entry['expires_at'] < $now) {
+                // Supprimer les tags associés
+                if (isset($entry['tags'])) {
+                    $this->removeKeyFromTags($key, $entry['tags']);
+                }
                 unset($this->cache[$key]);
             }
         }
@@ -208,14 +244,101 @@ class QueryCache
      * Invalide le cache pour une entité spécifique
      * Utile quand une entité est modifiée/supprimée
      * 
+     * ✅ PHASE 3.2: Invalidation granulaire au lieu de globale
+     * 
      * @param string $entityClass Classe de l'entité
      * @param int|string|null $entityId ID de l'entité (null = toutes les entités de cette classe)
      * @return void
      */
     public function invalidateEntity(string $entityClass, int|string|null $entityId = null): void
     {
-        // Pour simplifier, on invalide tout le cache quand une entité est modifiée
-        // Une implémentation plus fine pourrait invalider seulement les requêtes concernées
-        $this->clear();
+        if (!$this->enabled) {
+            return;
+        }
+        
+        // Construire les tags à invalider
+        $tagsToInvalidate = [];
+        
+        if ($entityId !== null) {
+            // Invalider les requêtes concernant cette entité spécifique
+            $tagsToInvalidate[] = $this->buildTag($entityClass, $entityId);
+        }
+        
+        // Toujours invalider les requêtes concernant toutes les entités de cette classe
+        // (ex: findAll(), findBy() sans critères spécifiques)
+        $tagsToInvalidate[] = $this->buildTag($entityClass, '*');
+        
+        // Invalider toutes les clés associées à ces tags
+        $keysToDelete = [];
+        foreach ($tagsToInvalidate as $tag) {
+            if (isset($this->tagIndex[$tag])) {
+                foreach ($this->tagIndex[$tag] as $key) {
+                    if (!in_array($key, $keysToDelete, true)) {
+                        $keysToDelete[] = $key;
+                    }
+                }
+            }
+        }
+        
+        // Supprimer les clés du cache
+        foreach ($keysToDelete as $key) {
+            $this->delete($key);
+        }
+    }
+    
+    /**
+     * Construit un tag à partir d'une classe d'entité et d'un ID
+     * 
+     * @param string $entityClass Classe de l'entité
+     * @param int|string|null $entityId ID de l'entité ('*' pour toutes les entités)
+     * @return string Tag
+     */
+    private function buildTag(string $entityClass, int|string|null $entityId): string
+    {
+        $id = $entityId === null ? '*' : (string)$entityId;
+        return $entityClass . ':' . $id;
+    }
+    
+    /**
+     * Ajoute une clé aux index des tags
+     * 
+     * @param string $key Clé du cache
+     * @param array $tags Tags
+     * @return void
+     */
+    private function addKeyToTags(string $key, array $tags): void
+    {
+        foreach ($tags as $tag) {
+            if (!isset($this->tagIndex[$tag])) {
+                $this->tagIndex[$tag] = [];
+            }
+            if (!in_array($key, $this->tagIndex[$tag], true)) {
+                $this->tagIndex[$tag][] = $key;
+            }
+        }
+    }
+    
+    /**
+     * Supprime une clé des index des tags
+     * 
+     * @param string $key Clé du cache
+     * @param array $tags Tags
+     * @return void
+     */
+    private function removeKeyFromTags(string $key, array $tags): void
+    {
+        foreach ($tags as $tag) {
+            if (isset($this->tagIndex[$tag])) {
+                $this->tagIndex[$tag] = array_values(array_filter(
+                    $this->tagIndex[$tag],
+                    fn($k) => $k !== $key
+                ));
+                
+                // Supprimer le tag s'il n'a plus de clés
+                if (empty($this->tagIndex[$tag])) {
+                    unset($this->tagIndex[$tag]);
+                }
+            }
+        }
     }
 }

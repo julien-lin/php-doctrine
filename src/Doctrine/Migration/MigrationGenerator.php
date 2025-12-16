@@ -251,18 +251,18 @@ class MigrationGenerator
                     
                     // Créer la FK seulement si la table cible existe déjà ou sera créée avant
                     if ($targetTableExists || $targetWillBeCreated) {
-                        $targetIdColumn = $targetMetadata['id'];
-                        $targetIdInfo = $targetMetadata['columns'][$targetIdColumn] ?? null;
-                        $targetIdName = $targetIdInfo['name'] ?? $targetIdColumn;
-                        
-                        $fkNameEscaped = $this->escapeIdentifier('fk_' . $metadata['table'] . '_' . $fkColumn);
+                    $targetIdColumn = $targetMetadata['id'];
+                    $targetIdInfo = $targetMetadata['columns'][$targetIdColumn] ?? null;
+                    $targetIdName = $targetIdInfo['name'] ?? $targetIdColumn;
+                    
+                    $fkNameEscaped = $this->escapeIdentifier('fk_' . $metadata['table'] . '_' . $fkColumn);
                         $targetTableEscaped = $this->escapeIdentifier($targetTableName);
-                        $targetIdEscaped = $this->escapeIdentifier($targetIdName);
-                        
-                        $foreignKeys[] = "CONSTRAINT {$fkNameEscaped} 
-                                         FOREIGN KEY ({$fkColumnEscaped}) 
-                                         REFERENCES {$targetTableEscaped} ({$targetIdEscaped}) 
-                                         ON DELETE CASCADE";
+                    $targetIdEscaped = $this->escapeIdentifier($targetIdName);
+                    
+                    $foreignKeys[] = "CONSTRAINT {$fkNameEscaped} 
+                                     FOREIGN KEY ({$fkColumnEscaped}) 
+                                     REFERENCES {$targetTableEscaped} ({$targetIdEscaped}) 
+                                     ON DELETE CASCADE";
                     }
                     // Sinon, on ne crée pas la FK maintenant (elle sera créée dans une migration ultérieure)
                 } catch (\Exception $e) {

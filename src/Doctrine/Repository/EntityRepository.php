@@ -7,6 +7,7 @@ namespace JulienLinard\Doctrine\Repository;
 use JulienLinard\Doctrine\Database\Connection;
 use JulienLinard\Doctrine\Metadata\MetadataReader;
 use JulienLinard\Doctrine\Cache\QueryCache;
+use JulienLinard\Doctrine\LazyLoader\LazyCollection;
 use ReflectionClass;
 
 /**
@@ -97,7 +98,7 @@ class EntityRepository implements RepositoryInterface
     /**
      * Trouve une entité par son ID
      */
-    public function find(int|string $id): ?object
+    public function find(int|string $id, bool $useCache = false, ?int $cacheTtl = null): ?object
     {
         if ($this->idProperty === null) {
             throw new \RuntimeException("L'entité {$this->entityClass} n'a pas de propriété ID définie.");
@@ -109,13 +110,35 @@ class EntityRepository implements RepositoryInterface
         $tableName = $this->escapeIdentifier($this->tableName);
         $idColumnEscaped = $this->escapeIdentifier($idColumn);
         $sql = "SELECT * FROM {$tableName} WHERE {$idColumnEscaped} = :id";
-        $row = $this->connection->fetchOne($sql, ['id' => $id]);
+        $params = ['id' => $id];
+        
+        // Vérifier le cache si activé
+        if ($useCache && $this->queryCache !== null && $this->queryCache->isEnabled()) {
+            $cacheKey = $this->queryCache->generateKey($sql, $params);
+            $cached = $this->queryCache->get($cacheKey);
+            
+            if ($cached !== null) {
+                return $this->hydrate($cached);
+            }
+        }
+        
+        $row = $this->connection->fetchOne($sql, $params);
 
         if ($row === null) {
             return null;
         }
 
-        return $this->hydrate($row);
+        $entity = $this->hydrate($row);
+        
+        // Mettre en cache si activé
+        if ($useCache && $this->queryCache !== null && $this->queryCache->isEnabled()) {
+            $cacheKey = $this->queryCache->generateKey($sql, $params);
+            // ✅ PHASE 3.2: Tagger avec l'entité spécifique pour invalidation granulaire
+            $tags = [$this->buildEntityTag($id)]; // find() concerne une entité spécifique
+            $this->queryCache->set($cacheKey, $row, $cacheTtl, $tags);
+        }
+        
+        return $entity;
     }
 
     /**
@@ -147,7 +170,9 @@ class EntityRepository implements RepositoryInterface
         // Mettre en cache si activé
         if ($useCache && $this->queryCache !== null && $this->queryCache->isEnabled()) {
             $cacheKey = $this->queryCache->generateKey($sql, $params);
-            $this->queryCache->set($cacheKey, $rows, $cacheTtl);
+            // ✅ PHASE 3.2: Tagger avec l'entité concernée pour invalidation granulaire
+            $tags = [$this->buildEntityTag('*')]; // findAll() concerne toutes les entités de cette classe
+            $this->queryCache->set($cacheKey, $rows, $cacheTtl, $tags);
         }
         
         return $entities;
@@ -233,7 +258,9 @@ class EntityRepository implements RepositoryInterface
             $cacheKey = $this->queryCache->generateKey($sql, $params);
             // Sérialiser les données brutes pour le cache (pas les objets)
             $cacheData = $rows; // Stocker les données brutes plutôt que les objets
-            $this->queryCache->set($cacheKey, $cacheData, $cacheTtl);
+            // ✅ PHASE 3.2: Tagger avec l'entité concernée pour invalidation granulaire
+            $tags = [$this->buildEntityTag('*')]; // findBy() concerne toutes les entités de cette classe
+            $this->queryCache->set($cacheKey, $cacheData, $cacheTtl, $tags);
         }
         
         return $entities;
@@ -327,6 +354,13 @@ class EntityRepository implements RepositoryInterface
         // Charger les relations ManyToOne si elles existent
         $this->loadManyToOneRelations($entity, $row);
         
+        // ✅ PHASE 3.1: Lazy loading automatique pour OneToMany
+        // Initialiser les relations OneToMany avec LazyCollection si l'entité supporte le lazy loading
+        if ($this->supportsLazyLoading($entity)) {
+            $this->configureLazyLoading($entity);
+            $this->initializeLazyRelations($entity);
+        }
+        
         return $entity;
     }
     
@@ -393,11 +427,26 @@ class EntityRepository implements RepositoryInterface
                 continue;
             }
             
+            $property = $reflection->getProperty($propertyName);
+            $property->setAccessible(true);
+            $currentValue = $property->getValue($entity);
+            
+            // ✅ PHASE 3.1: Si c'est déjà une LazyCollection, ne pas la remplacer (elle se chargera elle-même)
+            if ($currentValue instanceof LazyCollection) {
+                continue;
+            }
+            
+            // Si c'est déjà un tableau non vide, ne pas le remplacer
+            if (is_array($currentValue) && !empty($currentValue)) {
+                continue;
+            }
+            
             // Charger les entités liées
             $targetRepository = new EntityRepository(
                 $this->connection,
                 $this->metadataReader,
-                $relation['targetEntity']
+                $relation['targetEntity'],
+                $this->queryCache
             );
             
             $targetMetadata = $this->metadataReader->getMetadata($relation['targetEntity']);
@@ -420,8 +469,6 @@ class EntityRepository implements RepositoryInterface
             $relatedEntities = $targetRepository->findBy([$joinColumn => $entityId]);
             
             // Définir la propriété
-            $property = $reflection->getProperty($propertyName);
-            $property->setAccessible(true);
             $property->setValue($entity, $relatedEntities);
         }
     }
@@ -578,7 +625,155 @@ class EntityRepository implements RepositoryInterface
      */
     private function hydrateFromCache(array $cachedData): array
     {
-        return array_map([$this, 'hydrate'], $cachedData);
+        $entities = array_map([$this, 'hydrate'], $cachedData);
+        
+        // ✅ PHASE 3.1: Configurer le lazy loading pour toutes les entités
+        foreach ($entities as $entity) {
+            if ($this->supportsLazyLoading($entity)) {
+                $this->configureLazyLoading($entity);
+            }
+        }
+        
+        return $entities;
+    }
+    
+    /**
+     * Vérifie si une entité supporte le lazy loading automatique
+     * 
+     * @param object $entity Entité
+     * @return bool True si l'entité utilise LazyLoaderTrait
+     */
+    private function supportsLazyLoading(object $entity): bool
+    {
+        $className = get_class($entity);
+        $traitName = \JulienLinard\Doctrine\LazyLoader\LazyLoaderTrait::class;
+        
+        // Vérifier les traits de la classe et de ses parents
+        $classes = [$className];
+        while ($parent = get_parent_class($className)) {
+            $classes[] = $parent;
+            $className = $parent;
+        }
+        
+        foreach ($classes as $class) {
+            $traits = class_uses($class);
+            if ($traits && in_array($traitName, $traits, true)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Configure le lazy loading automatique pour une entité
+     * 
+     * @param object $entity Entité
+     * @return void
+     */
+    private function configureLazyLoading(object $entity): void
+    {
+        if (method_exists($entity, '_setRepository')) {
+            $entity->_setRepository($this);
+        }
+    }
+    
+    /**
+     * Initialise les relations OneToMany avec LazyCollection pour le lazy loading automatique
+     * 
+     * @param object $entity Entité
+     * @return void
+     */
+    private function initializeLazyRelations(object $entity): void
+    {
+        $metadata = $this->metadataReader->getMetadata($this->entityClass);
+        $reflection = new ReflectionClass($this->entityClass);
+        
+        foreach ($metadata['relations'] ?? [] as $propertyName => $relation) {
+            if ($relation['type'] !== 'OneToMany') {
+                continue;
+            }
+            
+            // Vérifier si la propriété existe et n'est pas déjà initialisée
+            if (!$reflection->hasProperty($propertyName)) {
+                continue;
+            }
+            
+            $property = $reflection->getProperty($propertyName);
+            $property->setAccessible(true);
+            $currentValue = $property->getValue($entity);
+            
+            // Si la propriété est déjà un tableau non vide (chargé manuellement), ne pas la remplacer
+            // Mais si c'est un tableau vide (initialisation par défaut), le remplacer par LazyCollection
+            if (is_array($currentValue) && !empty($currentValue)) {
+                continue;
+            }
+            
+            // Si c'est déjà une LazyCollection, ne pas la remplacer
+            if ($currentValue instanceof LazyCollection) {
+                continue;
+            }
+            
+            // Créer une LazyCollection qui chargera les relations à la demande
+            $repository = $this;
+            $entityClass = $this->entityClass;
+            $relationData = $relation; // Capturer les données de la relation
+            $lazyCollection = new LazyCollection(function() use ($repository, $entity, $propertyName, $entityClass, $relationData) {
+                // Charger directement les entités liées sans passer par loadOneToManyRelations
+                $metadata = $repository->metadataReader->getMetadata($entityClass);
+                $reflection = new ReflectionClass($entityClass);
+                
+                // Récupérer l'ID de l'entité
+                $idProperty = $reflection->getProperty($metadata['id']);
+                $idProperty->setAccessible(true);
+                $entityId = $idProperty->getValue($entity);
+                
+                if ($entityId === null) {
+                    return [];
+                }
+                
+                // Charger les entités liées
+                $targetRepository = new EntityRepository(
+                    $repository->connection,
+                    $repository->metadataReader,
+                    $relationData['targetEntity'],
+                    $repository->queryCache
+                );
+                
+                $targetMetadata = $repository->metadataReader->getMetadata($relationData['targetEntity']);
+                $mappedBy = $relationData['mappedBy'];
+                
+                // Trouver la colonne de jointure
+                $joinColumn = null;
+                foreach ($targetMetadata['relations'] ?? [] as $targetProp => $targetRel) {
+                    if ($targetRel['type'] === 'ManyToOne' && $targetRel['joinColumn']) {
+                        $joinColumn = $targetRel['joinColumn'];
+                        break;
+                    }
+                }
+                
+                if ($joinColumn === null) {
+                    $joinColumn = $mappedBy . '_id';
+                }
+                
+                // Rechercher les entités liées
+                return $targetRepository->findBy([$joinColumn => $entityId]);
+            });
+            
+            $property->setValue($entity, $lazyCollection);
+        }
+    }
+    
+    /**
+     * Construit un tag d'entité pour l'invalidation granulaire du cache
+     * 
+     * @param int|string $entityId ID de l'entité ('*' pour toutes les entités)
+     * @return string Tag (ex: 'User:1' ou 'User:*')
+     */
+    private function buildEntityTag(int|string $entityId): string
+    {
+        $id = ($entityId === '*') ? '*' : (string)$entityId;
+        return $this->entityClass . ':' . $id;
     }
 }
 

@@ -136,6 +136,8 @@ class TestProduct
 #[Entity(table: 'test_users')]
 class TestUserWithRelations
 {
+    use \JulienLinard\Doctrine\LazyLoader\LazyLoaderTrait;
+    
     #[Id]
     #[Column(type: 'integer', autoIncrement: true)]
     public ?int $id = null;
@@ -147,7 +149,7 @@ class TestUserWithRelations
     public string $name;
     
     #[OneToMany(targetEntity: TestPostWithRelations::class, mappedBy: 'user', cascade: ['persist', 'remove'])]
-    public array $posts = [];
+    public array|\JulienLinard\Doctrine\LazyLoader\LazyCollection $posts = [];
 }
 
 #[Entity(table: 'test_posts')]

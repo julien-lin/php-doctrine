@@ -5,6 +5,107 @@ Tous les changements notables de ce projet seront documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2025-01-15
+
+### 🚀 Optimisation du Cache (Phase 3.2)
+
+- **Invalidation granulaire du cache** : Remplacement de l'invalidation globale par une invalidation ciblée
+  - Système de tags pour associer les clés de cache aux entités
+  - Modification de `QueryCache::set()` : Accepte maintenant un paramètre `$tags` pour taguer les entrées
+  - Modification de `QueryCache::invalidateEntity()` : Invalide uniquement les requêtes concernées par l'entité modifiée
+  - Index des tags (`tagIndex`) : Structure de données pour retrouver rapidement les clés à invalider
+  - Modification de `EntityRepository::find()` : Support du cache avec tags (entité spécifique)
+  - Modification de `EntityRepository::findAll()` et `findBy()` : Tags avec `*` pour toutes les entités de la classe
+  - Nouvelle méthode `EntityRepository::buildEntityTag()` : Construit les tags d'entité pour l'invalidation
+  - Nouveau fichier de tests `CacheGranularInvalidationTest.php` : 5 tests pour valider l'invalidation granulaire
+    - Test d'invalidation granulaire (seulement les requêtes concernées)
+    - Test d'invalidation d'une entité spécifique
+    - Test que l'invalidation n'affecte pas les autres entités
+    - Test d'invalidation lors de la suppression
+    - Test d'invalidation avec `findAll()`
+
+## [1.1.9] - 2025-01-15
+
+### ⚡ Lazy Loading Automatique (Phase 3.1)
+
+- **Lazy loading automatique pour OneToMany** : Implémentation complète
+  - Nouvelle classe `LazyCollection` : Collection lazy qui charge les relations à la demande
+  - Nouveau trait `LazyLoaderTrait` : Trait optionnel pour activer le lazy loading dans les entités
+  - Modification de `EntityRepository::hydrate()` : Initialise automatiquement les relations OneToMany avec `LazyCollection`
+  - Modification de `EntityRepository::loadOneToManyRelations()` : Ne remplace pas les `LazyCollection` existantes
+  - Nouveau fichier de tests `LazyLoadingTest.php` : 5 tests pour valider le lazy loading automatique
+    - Test de chargement automatique lors de l'accès
+    - Test avec `count()`
+    - Test avec `foreach`
+    - Test de cache (chargement unique)
+    - Test avec `findAll()`
+
+## [1.1.8] - 2025-01-15
+
+### 🔒 Sécurité
+
+- **Remplacement de MD5 par xxh3/sha256** : Amélioration de la sécurité des hash de cache
+  - `QueryCache::generateKey()` : Utilise maintenant xxh3 (si disponible) ou sha256 au lieu de MD5
+  - Tests ajoutés pour valider l'utilisation des algorithmes sécurisés (`HashSecurityTest.php`)
+
+### 🧪 Tests
+
+- **Tests supplémentaires** : Amélioration de la couverture de tests
+  - `HashSecurityTest.php` : 7 tests pour valider les hash sécurisés
+    - Vérification du code source (pas de MD5)
+    - Tests de cohérence et unicité des hash
+    - Tests de normalisation SQL et tri des paramètres
+
+### 📝 Documentation
+
+- **Documentation technique complète** : Création de 6 fichiers de documentation
+  - `DOCUMENTATION/ARCHITECTURE.md` : Architecture globale de l'ORM (402 lignes)
+  - `DOCUMENTATION/ENTITIES.md` : Mapping et entités (430 lignes)
+  - `DOCUMENTATION/REPOSITORIES.md` : Pattern Repository (337 lignes)
+  - `DOCUMENTATION/QUERY_BUILDER.md` : Query Builder (362 lignes)
+  - `DOCUMENTATION/MIGRATIONS.md` : Système de migrations (283 lignes)
+  - `DOCUMENTATION/PERFORMANCE.md` : Optimisations et performance (365 lignes)
+
+### 🧪 Tests Supplémentaires
+
+- **Tests de performance pour le cache** : Nouveau fichier `CachePerformanceTest.php`
+  - 6 tests de performance pour valider les nouveaux hash (xxh3/sha256)
+  - Tests de génération de clés de cache
+  - Tests de performance cache hit/miss
+  - Tests d'invalidation du cache
+  - Tests de comparaison avec/sans cache
+
+### ⚡ Lazy Loading Automatique (Phase 3.1)
+
+- **Lazy loading automatique pour OneToMany** : Implémentation complète
+  - Nouvelle classe `LazyCollection` : Collection lazy qui charge les relations à la demande
+  - Nouveau trait `LazyLoaderTrait` : Trait optionnel pour activer le lazy loading dans les entités
+  - Modification de `EntityRepository::hydrate()` : Initialise automatiquement les relations OneToMany avec `LazyCollection`
+  - Modification de `EntityRepository::loadOneToManyRelations()` : Ne remplace pas les `LazyCollection` existantes
+  - Nouveau fichier de tests `LazyLoadingTest.php` : 5 tests pour valider le lazy loading automatique
+    - Test de chargement automatique lors de l'accès
+    - Test avec `count()`
+    - Test avec `foreach`
+    - Test de cache (chargement unique)
+    - Test avec `findAll()`
+
+### 🚀 Optimisation du Cache (Phase 3.2)
+
+- **Invalidation granulaire du cache** : Remplacement de l'invalidation globale par une invalidation ciblée
+  - Système de tags pour associer les clés de cache aux entités
+  - Modification de `QueryCache::set()` : Accepte maintenant un paramètre `$tags` pour taguer les entrées
+  - Modification de `QueryCache::invalidateEntity()` : Invalide uniquement les requêtes concernées par l'entité modifiée
+  - Index des tags (`tagIndex`) : Structure de données pour retrouver rapidement les clés à invalider
+  - Modification de `EntityRepository::find()` : Support du cache avec tags (entité spécifique)
+  - Modification de `EntityRepository::findAll()` et `findBy()` : Tags avec `*` pour toutes les entités de la classe
+  - Nouvelle méthode `EntityRepository::buildEntityTag()` : Construit les tags d'entité pour l'invalidation
+  - Nouveau fichier de tests `CacheGranularInvalidationTest.php` : 5 tests pour valider l'invalidation granulaire
+    - Test d'invalidation granulaire (seulement les requêtes concernées)
+    - Test d'invalidation d'une entité spécifique
+    - Test que l'invalidation n'affecte pas les autres entités
+    - Test d'invalidation lors de la suppression
+    - Test d'invalidation avec `findAll()`
+
 ## [1.1.7] - 2025-11-30
 
 ### Corrigé

@@ -82,12 +82,20 @@ class RelationsTest extends TestCase
         // Charger l'utilisateur
         $loadedUser = $this->em->find(TestUserWithRelations::class, $user->id);
         
-        // Charger les relations OneToMany
+        // ✅ PHASE 3.1: Le lazy loading est automatique, pas besoin d'appeler loadRelations()
+        // Mais on peut toujours l'appeler pour forcer le chargement
         $this->em->loadRelations($loadedUser);
         
         $this->assertNotNull($loadedUser);
-        $this->assertIsArray($loadedUser->posts);
-        $this->assertCount(2, $loadedUser->posts);
+        
+        // La propriété posts peut être une LazyCollection ou un tableau
+        $posts = $loadedUser->posts;
+        if ($posts instanceof \JulienLinard\Doctrine\LazyLoader\LazyCollection) {
+            // Convertir en tableau pour la vérification
+            $posts = $posts->toArray();
+        }
+        $this->assertIsArray($posts);
+        $this->assertCount(2, $posts);
     }
     
     /**
@@ -120,8 +128,15 @@ class RelationsTest extends TestCase
         
         // Vérifier les relations
         $loadedUser = $this->em->find(TestUserWithRelations::class, $user->id);
+        // ✅ PHASE 3.1: Le lazy loading est automatique, pas besoin d'appeler loadRelations()
+        // Mais on peut toujours l'appeler pour forcer le chargement
         $this->em->loadRelations($loadedUser);
-        $this->assertCount(2, $loadedUser->posts);
+        // La propriété posts peut être une LazyCollection ou un tableau
+        $posts = $loadedUser->posts;
+        if ($posts instanceof \JulienLinard\Doctrine\LazyLoader\LazyCollection) {
+            $posts = $posts->toArray();
+        }
+        $this->assertCount(2, $posts);
     }
     
     /**

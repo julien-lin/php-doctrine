@@ -53,8 +53,12 @@
         }
     },
     "scripts": {
-        "test": "vendor/bin/phpunit",
-        "test-coverage": "vendor/bin/phpunit --coverage-text",
+        "test": "vendor/bin/phpunit --exclude-group performance",
+        "test:unit": "vendor/bin/phpunit --testsuite default --exclude-group performance",
+        "test:integration": "vendor/bin/phpunit --testsuite integration --exclude-group performance",
+        "test:security": "vendor/bin/phpunit --testsuite security",
+        "test:performance": "vendor/bin/phpunit --testsuite performance --group performance",
+        "test-coverage": "vendor/bin/phpunit --coverage-text --exclude-group performance",
         "doctrine-migrate": "php bin/doctrine-migrate"
     },
     "bin": [
@@ -62,6 +66,5 @@
     ],
     "minimum-stability": "stable",
     "prefer-stable": true,
-    "version": "1.1.7"
+    "version": "1.2.0"
 }
-

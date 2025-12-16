@@ -23,6 +23,11 @@
             <directory>tests/Performance</directory>
         </testsuite>
     </testsuites>
+    <groups>
+        <exclude>
+            <group>performance</group>
+        </exclude>
+    </groups>
     <source>
         <include>
             <directory>src</directory>
