@@ -97,7 +97,6 @@ class EntityManager
         if ($metadata['id'] !== null) {
             $reflection = $this->getReflectionClass($entity);
             $idProperty = $reflection->getProperty($metadata['id']);
-            $idProperty->setAccessible(true);
             $id = $idProperty->getValue($entity);
 
             // Si l'entité a un ID, sauvegarder l'état original
@@ -170,7 +169,6 @@ class EntityManager
                     if ($metadata['id'] !== null) {
                         $reflection = $this->getReflectionClass($entity);
                         $idProperty = $reflection->getProperty($metadata['id']);
-                        $idProperty->setAccessible(true);
                         $id = $idProperty->getValue($entity);
 
                         if ($id !== null && $id !== 0) {
@@ -262,7 +260,6 @@ class EntityManager
         if ($metadata['id'] !== null) {
             $reflection = $this->getReflectionClass($entity);
             $idProperty = $reflection->getProperty($metadata['id']);
-            $idProperty->setAccessible(true);
             $id = $idProperty->getValue($entity);
 
             if ($id !== null && $id !== 0) {
@@ -311,7 +308,6 @@ class EntityManager
             }
 
             $property = $reflection->getProperty($propertyName);
-            $property->setAccessible(true);
             $value = $property->getValue($entity);
 
             if ($value === null) {
@@ -335,7 +331,6 @@ class EntityManager
                                         $relatedRel['targetEntity'] === $className
                                     ) {
                                         $relatedProp = $relatedReflection->getProperty($relatedPropName);
-                                        $relatedProp->setAccessible(true);
                                         $relatedProp->setValue($relatedEntity, $entity);
                                         break;
                                     }
@@ -390,7 +385,6 @@ class EntityManager
             }
 
             $property = $reflection->getProperty($propertyName);
-            $property->setAccessible(true);
             $value = $property->getValue($entity);
 
             if ($value === null) {
@@ -459,7 +453,6 @@ class EntityManager
 
         foreach ($metadata['columns'] as $propertyName => $columnInfo) {
             $property = $reflection->getProperty($propertyName);
-            $property->setAccessible(true);
             $value = $property->getValue($entity);
 
             // Ignorer les valeurs null sauf si nullable
@@ -485,7 +478,6 @@ class EntityManager
             }
 
             $property = $reflection->getProperty($propertyName);
-            $property->setAccessible(true);
             $relatedEntity = $property->getValue($entity);
 
             if ($relatedEntity !== null && is_object($relatedEntity)) {
@@ -493,7 +485,6 @@ class EntityManager
                 $relatedMetadata = $this->metadataReader->getMetadata($relation['targetEntity']);
                 $relatedReflection = $this->getReflectionClass($relatedEntity);
                 $relatedIdProperty = $relatedReflection->getProperty($relatedMetadata['id']);
-                $relatedIdProperty->setAccessible(true);
                 $relatedId = $relatedIdProperty->getValue($relatedEntity);
 
                 // Si l'entité liée n'a pas d'ID, la persister d'abord
@@ -533,7 +524,6 @@ class EntityManager
             $lastId = $this->connection->lastInsertId();
             if ($lastId) {
                 $idProperty = $reflection->getProperty($metadata['id']);
-                $idProperty->setAccessible(true);
                 $idProperty->setValue($entity, (int)$lastId);
                 // Enregistrer l'état original pour activer le dirty checking dès l'insertion
                 $this->registerOriginalState($entity);
@@ -615,7 +605,6 @@ class EntityManager
 
                 $columnIndex = $columnMap[$propertyName];
                 $property = $reflection->getProperty($propertyName);
-                $property->setAccessible(true);
                 $value = $property->getValue($entity);
 
                 // Convertir la valeur pour la base de données
@@ -643,14 +632,12 @@ class EntityManager
 
                 $columnIndex = $columnMap[$mapKey];
                 $property = $reflection->getProperty($propertyName);
-                $property->setAccessible(true);
                 $relatedEntity = $property->getValue($entity);
 
                 if ($relatedEntity !== null && is_object($relatedEntity)) {
                     $relatedMetadata = $this->metadataReader->getMetadata($relation['targetEntity']);
                     $relatedReflection = $this->getReflectionClass($relatedEntity);
                     $relatedIdProperty = $relatedReflection->getProperty($relatedMetadata['id']);
-                    $relatedIdProperty->setAccessible(true);
                     $relatedId = $relatedIdProperty->getValue($relatedEntity);
 
                     // Si l'entité liée n'a pas d'ID, la persister d'abord
@@ -699,7 +686,6 @@ class EntityManager
                     for ($i = $count - 1; $i >= 0; $i--) {
                         $id = $lastId - ($count - 1 - $i);
                         $idProperty = $reflection->getProperty($idPropertyName);
-                        $idProperty->setAccessible(true);
                         $idProperty->setValue($entities[$i], $id);
 
                         // Enregistrer l'état original pour le dirty checking
@@ -713,7 +699,6 @@ class EntityManager
                     for ($i = 0; $i < $count; $i++) {
                         $id = $firstIdInt + $i;
                         $idProperty = $reflection->getProperty($idPropertyName);
-                        $idProperty->setAccessible(true);
                         $idProperty->setValue($entities[$i], $id);
 
                         // Enregistrer l'état original pour le dirty checking
@@ -741,7 +726,6 @@ class EntityManager
         $reflection = $this->getReflectionClass($entity);
         $idPropertyName = $metadata['id'];
         $idProperty = $reflection->getProperty($idPropertyName);
-        $idProperty->setAccessible(true);
         $idValue = $idProperty->getValue($entity);
 
         if ($idValue === null) {
@@ -762,7 +746,6 @@ class EntityManager
             }
 
             $property = $reflection->getProperty($propertyName);
-            $property->setAccessible(true);
             $value = $property->getValue($entity);
 
             // Ignorer les valeurs null sauf si nullable
@@ -822,7 +805,6 @@ class EntityManager
 
         foreach ($metadata['columns'] as $propertyName => $columnInfo) {
             $property = $reflection->getProperty($propertyName);
-            $property->setAccessible(true);
             $value = $property->getValue($entity);
 
             // Normaliser les valeurs pour la comparaison
@@ -901,7 +883,6 @@ class EntityManager
 
         $reflection = $this->getReflectionClass($entity);
         $property = $reflection->getProperty($idProperty);
-        $property->setAccessible(true);
         $id = $property->getValue($entity);
 
         if ($id === null) {

@@ -37,7 +37,6 @@ class Validator
         // Valider toutes les propriétés avec des attributs Assert
         foreach ($metadata['columns'] ?? [] as $propertyName => $columnInfo) {
             $property = $reflection->getProperty($propertyName);
-            $property->setAccessible(true);
             $value = $property->getValue($entity);
             
             // Récupérer les attributs Assert
@@ -280,7 +279,6 @@ class Validator
     ): void {
         foreach ($metadata['relations'] ?? [] as $propertyName => $relation) {
             $property = $reflection->getProperty($propertyName);
-            $property->setAccessible(true);
             $value = $property->getValue($entity);
             
             // Valider l'existence des entités liées ManyToOne
@@ -290,7 +288,6 @@ class Validator
                     $targetMetadata = $this->metadataReader->getMetadata($relation['targetEntity']);
                     $targetReflection = new ReflectionClass($value);
                     $idProperty = $targetReflection->getProperty($targetMetadata['id']);
-                    $idProperty->setAccessible(true);
                     $id = $idProperty->getValue($value);
                     
                     if ($id === null || $id === 0) {
@@ -304,4 +301,3 @@ class Validator
         }
     }
 }
-

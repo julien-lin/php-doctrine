@@ -5,6 +5,12 @@ Tous les changements notables de ce projet seront documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### 🐛 Corrections
+
+- Suppression des appels dépréciés à `ReflectionProperty::setAccessible()` dans l'Entity Manager, les repositories et le validateur, désormais inutiles depuis PHP 8.1 et dépréciés en PHP 8.5.
+
 ## [1.2.0] - 2025-01-15
 
 ### 🚀 Optimisation du Cache (Phase 3.2)
@@ -349,4 +355,3 @@ et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 [1.0.6]: https://github.com/julien-lin/doctrine-php/compare/v1.0.0...v1.0.6
 [1.0.0]: https://github.com/julien-lin/doctrine-php/releases/tag/v1.0.0
-

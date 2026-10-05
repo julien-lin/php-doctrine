@@ -346,7 +346,6 @@ class EntityRepository implements RepositoryInterface
         foreach ($data as $propertyName => $value) {
             if ($reflection->hasProperty($propertyName)) {
                 $property = $reflection->getProperty($propertyName);
-                $property->setAccessible(true);
                 $property->setValue($entity, $value);
             }
         }
@@ -396,7 +395,6 @@ class EntityRepository implements RepositoryInterface
             
             if ($relatedEntity !== null) {
                 $property = $reflection->getProperty($propertyName);
-                $property->setAccessible(true);
                 $property->setValue($entity, $relatedEntity);
             }
         }
@@ -415,7 +413,6 @@ class EntityRepository implements RepositoryInterface
         
         // Récupérer l'ID de l'entité
         $idProperty = $reflection->getProperty($metadata['id']);
-        $idProperty->setAccessible(true);
         $entityId = $idProperty->getValue($entity);
         
         if ($entityId === null) {
@@ -428,7 +425,6 @@ class EntityRepository implements RepositoryInterface
             }
             
             $property = $reflection->getProperty($propertyName);
-            $property->setAccessible(true);
             $currentValue = $property->getValue($entity);
             
             // ✅ PHASE 3.1: Si c'est déjà une LazyCollection, ne pas la remplacer (elle se chargera elle-même)
@@ -515,8 +511,6 @@ class EntityRepository implements RepositoryInterface
         $entityMap = []; // Map ID => entité pour assignation rapide
         
         $idProperty = $reflection->getProperty($metadata['id']);
-        $idProperty->setAccessible(true);
-        
         foreach ($entities as $entity) {
             $entityId = $idProperty->getValue($entity);
             if ($entityId !== null) {
@@ -583,8 +577,6 @@ class EntityRepository implements RepositoryInterface
             
             // Hydrater les entités liées et les assigner aux entités parentes
             $property = $reflection->getProperty($relationName);
-            $property->setAccessible(true);
-            
             foreach ($entityMap as $entityId => $entity) {
                 $relatedRows = $groupedResults[$entityId] ?? [];
                 $relatedEntities = array_map(
@@ -700,7 +692,6 @@ class EntityRepository implements RepositoryInterface
             }
             
             $property = $reflection->getProperty($propertyName);
-            $property->setAccessible(true);
             $currentValue = $property->getValue($entity);
             
             // Si la propriété est déjà un tableau non vide (chargé manuellement), ne pas la remplacer
@@ -725,7 +716,6 @@ class EntityRepository implements RepositoryInterface
                 
                 // Récupérer l'ID de l'entité
                 $idProperty = $reflection->getProperty($metadata['id']);
-                $idProperty->setAccessible(true);
                 $entityId = $idProperty->getValue($entity);
                 
                 if ($entityId === null) {
@@ -776,4 +766,3 @@ class EntityRepository implements RepositoryInterface
         return $this->entityClass . ':' . $id;
     }
 }
-
