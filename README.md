@@ -4,7 +4,7 @@
 
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.0-blue.svg)](https://www.php.net/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-141%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-164%20passing-brightgreen.svg)](tests/)
 
 A modern, lightweight ORM (Object-Relational Mapping) for PHP 8+ inspired by Doctrine ORM. Features Entity Manager, Repository Pattern, Query Builder, and PHP 8 Attributes mapping with automatic optimizations.
 

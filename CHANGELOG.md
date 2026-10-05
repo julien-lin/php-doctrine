@@ -5,6 +5,12 @@ Tous les changements notables de ce projet seront documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/),
 et ce projet adhère au [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-10-05
+
+### 📝 Documentation
+
+- Mise à jour des badges de tests dans les README anglais et français.
+
 ## [1.2.1] - 2026-10-05
 
 ### 🐛 Corrections
