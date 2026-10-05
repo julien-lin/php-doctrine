@@ -65,6 +65,5 @@
         "bin/doctrine-migrate"
     ],
     "minimum-stability": "stable",
-    "prefer-stable": true,
-    "version": "1.2.0"
+    "prefer-stable": true
 }
